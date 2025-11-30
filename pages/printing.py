@@ -110,7 +110,7 @@ for key, order in printing_orders.items():
                 })
 
                 st.success("🔄 Printing started!")
-                st.experimental_rerun()
+                st.rerun()
 
         # COMPLETE PRINTING & MOVE STAGE
         with colB:
@@ -131,5 +131,5 @@ for key, order in printing_orders.items():
                 update(f"orders/{key}", update_data)
 
                 st.success(f"Order {order['order_id']} moved to Die-Cut Department!")
-                st.experimental_rerun()
+                st.rerun()
 
