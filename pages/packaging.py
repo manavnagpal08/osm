@@ -3,8 +3,12 @@ from firebase import read, update
 from datetime import datetime
 import base64
 import io
+import json
 import qrcode
 
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
 st.set_page_config(page_title="Packing Department", page_icon="📦", layout="wide")
 
 # ---------------- ROLE CHECK ----------------
@@ -16,7 +20,7 @@ if st.session_state["role"] not in ["packing", "admin"]:
     st.stop()
 
 st.title("📦 Packing Department")
-st.caption("Handle packing, generate QR codes, track time, assign work & move orders to Dispatch.")
+st.caption("Handle packing, generate QR codes, assign work & move orders to Dispatch.")
 
 # ---------------- LOAD ORDERS ----------------
 orders = read("orders") or {}
@@ -32,7 +36,7 @@ for key, o in orders.items():
     elif o.get("packing_completed_at"):
         completed[key] = o
 
-# --------- SORT BY PRIORITY ----------
+# ---------- SORT PENDING BY PRIORITY ----------
 priority_rank = {"High": 0, "Medium": 1, "Low": 2}
 
 sorted_pending = sorted(
@@ -54,9 +58,11 @@ def generate_qr_base64(data: str):
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
-# ---------- PDF SLIP ----------
-def generate_packing_slip(o, assign, material, notes, qr_b64):
-    body = f"""
+
+# ---------- PDF SLIP GENERATOR ----------
+def generate_packing_slip(o, assign, material, notes, qr_b64, json_text):
+
+    text = f"""
 PACKING DEPARTMENT – JOB SLIP
 
 Order ID : {o.get('order_id')}
@@ -64,17 +70,18 @@ Customer : {o.get('customer')}
 Item     : {o.get('item')}
 Qty      : {o.get('qty')}
 
-Assigned To  : {assign}
-Material Used: {material}
+Assigned To  : {assign or '-'}
+Material Used: {material or '-'}
 
 Notes:
-{notes or "-"}
+{notes or '-'}
 
 Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+(Scan QR code to view complete JSON)
 """
 
-    body += "\n\n(Scan QR Code for product identification)"
-
+    # Build simple PDF manually
     pdf = f"""%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -87,12 +94,12 @@ endobj
 /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length {len(body) + 200} >>
+<< /Length {len(text) + 300} >>
 stream
 BT
 /F1 12 Tf
 50 750 Td
-{body.replace("\n", " T* ")}
+{text.replace("\n", " T* ")}
 ET
 endstream
 endobj
@@ -100,14 +107,15 @@ xref
 0 5
 0000000000 65535 f 
 0000000010 00000 n 
-0000000079 00000 n 
-0000000178 00000 n 
-0000000349 00000 n 
+0000000070 00000 n 
+0000000154 00000 n 
+0000000287 00000 n 
 trailer
 << /Root 1 0 R /Size 5 >>
 startxref
 500
-%%EOF"""
+%%EOF
+"""
     return pdf.encode("latin-1")
 
 
@@ -117,7 +125,7 @@ tab1, tab2 = st.tabs([
     f"✔ Completed ({len(completed)})"
 ])
 
-# ---------------- TAB 1: PENDING ----------------
+# ---------------- TAB 1 : PENDING PACKING ----------------
 with tab1:
 
     if not sorted_pending:
@@ -129,23 +137,21 @@ with tab1:
         start = o.get("packing_start")
         end = o.get("packing_end")
 
-        # Time check (36 hours delay warning)
+        # Calculate delay (36-hour warning)
         arrived = o.get("assembly_completed_at") or datetime.now().isoformat()
         arrived_dt = datetime.fromisoformat(arrived)
         hours_passed = (datetime.now() - arrived_dt).total_seconds() / 3600
 
-        qr_b64 = generate_qr_base64(order_id)
-
+        # ---- HEADER ----
         with st.container(border=True):
 
-            # ---- HEADER ----
             st.markdown(f"## 📦 {order_id} — {o.get('customer')}")
             st.caption(f"Item: {o.get('item')} • Qty: {o.get('qty')} • Priority: {o.get('priority')}")
 
             if hours_passed > 36:
-                st.error(f"⚠️ Delay Alert: Packing pending for **{int(hours_passed)} hours**")
+                st.error(f"⚠️ Delay: Packing pending for **{int(hours_passed)} hours**")
             else:
-                st.info(f"⏳ Time since arrived: **{int(hours_passed)} hours**")
+                st.info(f"⏳ Time since reached packing: **{int(hours_passed)} hours**")
 
             st.divider()
 
@@ -161,10 +167,10 @@ with tab1:
                 if st.button("⏹ End Packing", key=f"end_{order_id}", use_container_width=True):
                     update(f"orders/{key}", {"packing_end": datetime.now().isoformat()})
                     st.rerun()
-                st.info(f"Started: {start}")
+                st.info(f"Started at: {start}")
 
             else:
-                st.success(f"Completed: {end}")
+                st.success(f"Completed at: {end}")
 
             st.divider()
 
@@ -186,8 +192,28 @@ with tab1:
 
             st.divider()
 
-            # -------- QR CODE --------
-            st.subheader("🔳 QR Code for Order Identification")
+            # -------- QR CODE (JSON ENCODED) --------
+            st.subheader("🔳 QR Code")
+
+            qr_json_data = {
+                "order_id": o.get("order_id"),
+                "customer": o.get("customer"),
+                "item": o.get("item"),
+                "qty": o.get("qty"),
+                "priority": o.get("priority"),
+                "stage": "Packing",
+                "product_type": o.get("product_type"),
+                "assign_to": assign,
+                "material_used": material,
+                "notes": notes,
+                "next_stage": "Dispatch",
+                "timestamp": datetime.now().isoformat()
+            }
+
+            json_text = json.dumps(qr_json_data)
+
+            qr_b64 = generate_qr_base64(json_text)
+
             st.image(base64.b64decode(qr_b64), width=180)
 
             st.download_button(
@@ -200,7 +226,7 @@ with tab1:
 
             st.divider()
 
-            # -------- FILE UPLOAD --------
+            # -------- PACKING FILE UPLOAD --------
             st.subheader("📁 Upload Packing Output File")
 
             up = st.file_uploader("Upload File", type=["png", "jpg", "jpeg", "pdf"], key=f"file_{order_id}")
@@ -212,23 +238,26 @@ with tab1:
                 st.rerun()
 
             if o.get("packing_file"):
-                try:
-                    st.image(base64.b64decode(o["packing_file"]), use_container_width=True)
-                except:
+                raw = base64.b64decode(o["packing_file"])
+                if raw[:4] == b"%PDF":
                     st.info("PDF uploaded — download to view.")
-                    st.download_button(
-                        "⬇ Download File",
-                        base64.b64decode(o["packing_file"]),
-                        file_name=f"{order_id}_packing_file.pdf",
-                        mime="application/pdf"
-                    )
+                else:
+                    st.image(raw, use_container_width=True)
+
+                st.download_button(
+                    "⬇ Download File",
+                    raw,
+                    file_name=f"{order_id}_packing_output",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
             st.divider()
 
-            # -------- SLIP --------
+            # -------- PACKING SLIP PDF --------
             st.subheader("📄 Download Packing Slip")
 
-            slip_pdf = generate_packing_slip(o, assign, material, notes, qr_b64)
+            slip_pdf = generate_packing_slip(o, assign, material, notes, qr_b64, json_text)
 
             st.download_button(
                 label="⬇ Download Packing Slip (PDF)",
@@ -253,7 +282,8 @@ with tab1:
             else:
                 st.warning("Complete packing first.")
 
-# ---------------- TAB 2: COMPLETED ----------------
+
+# ---------------- TAB 2 : COMPLETED PACKING ----------------
 with tab2:
 
     if not completed:
@@ -263,7 +293,7 @@ with tab2:
         with st.container(border=True):
             st.markdown(f"### ✔ {o['order_id']} — {o.get('customer')}")
             st.write(f"Completed at: {o.get('packing_completed_at')}")
-            st.write(f"Material: {o.get('packing_material')}")
+            st.write(f"Material Used: {o.get('packing_material')}")
             st.write(f"Assigned To: {o.get('packing_assigned')}")
             st.write(f"Notes: {o.get('packing_notes')}")
             st.divider()
