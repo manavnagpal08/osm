@@ -26,12 +26,11 @@ orders = read("orders") or {}
 pending, completed = {}, {}
 
 for key, o in orders.items():
-
     if not isinstance(o, dict):
         continue
 
     if o.get("product_type") != "Box":
-        continue  # Only BOX orders
+        continue
 
     if o.get("stage") == "Lamination":
         pending[key] = o
@@ -40,12 +39,12 @@ for key, o in orders.items():
 
 
 # -------------------
-# Download Handler
+# FILE DOWNLOAD
 # -------------------
-def download_button(label, b64_data, order_id, fname, prefix):
+def download_button(label, b64_data, order_id, fname, key_prefix):
     if not b64_data:
         return
-
+    
     raw = base64.b64decode(b64_data)
     head = raw[:10]
 
@@ -63,13 +62,13 @@ def download_button(label, b64_data, order_id, fname, prefix):
         data=raw,
         file_name=f"{order_id}_{fname}{ext}",
         mime=mime,
-        key=f"{prefix}_{order_id}",
+        key=f"{key_prefix}_{order_id}",
         use_container_width=True
     )
 
 
 # -------------------
-# Preview Handler
+# FILE PREVIEW
 # -------------------
 def preview(label, b64):
     if not b64:
@@ -88,21 +87,21 @@ def preview(label, b64):
 
 
 # -------------------
-# PRINT PAGE JS
+# PRINT HANDLER
 # -------------------
-def print_section(html_id):
-    print_js = f"""
+def trigger_print(section_id):
+    js = f"""
     <script>
-    var content = document.getElementById('{html_id}').innerHTML;
-    var win = window.open("", "", "width=900,height=600");
-    win.document.write("<html><head><title>Print</title></head><body>");
-    win.document.write(content);
-    win.document.write("</body></html>");
-    win.document.close();
-    win.print();
+        var content = document.getElementById('{section_id}').innerHTML;
+        var win = window.open("", "", "width=900,height=650");
+        win.document.write('<html><head><title>Print</title></head><body>');
+        win.document.write(content);
+        win.document.write('</body></html>');
+        win.document.close();
+        win.print();
     </script>
     """
-    st.components.v1.html(print_js, height=0)
+    st.components.v1.html(js, height=0)
 
 
 # -------------------
@@ -115,7 +114,7 @@ tab1, tab2 = st.tabs([
 
 
 # -------------------
-# TAB 1 — PENDING
+# TAB 1 – PENDING
 # -------------------
 with tab1:
 
@@ -158,11 +157,12 @@ with tab1:
 
             st.divider()
 
-            # ---------------- LAMINATION DETAILS ----------------
+
+            # ---------------- DETAILS ----------------
             st.subheader("📋 Lamination Details")
 
             lam_type = st.selectbox(
-                "Type of Lamination",
+                "Lamination Type",
                 ["Gloss", "Matt", "Velvet", "Thermal", "BOPP Gloss", "BOPP Matt"],
                 index=0,
                 key=f"type_{order_id}"
@@ -171,30 +171,37 @@ with tab1:
             material = st.text_input(
                 "Quality / Material",
                 value=o.get("lamination_material", ""),
-                placeholder="e.g., 18 Micron BOPP",
+                placeholder="e.g., BOPP 18 Micron",
                 key=f"material_{order_id}"
             )
 
-            reel_width = st.number_input(
-                "Reel Width (in inches)",
-                min_value=1,
-                max_value=100,
+            reel = st.number_input(
+                "Reel Width (inches)",
+                min_value=1, max_value=100,
                 value=o.get("lamination_reel_width", 30),
-                key=f"width_{order_id}"
+                key=f"reel_{order_id}"
+            )
+
+            assign_to = st.text_input(
+                "Assign Work To",
+                value=o.get("lamination_assigned_to", ""),
+                placeholder="e.g., Rahul, Sameer",
+                key=f"assign_{order_id}"
             )
 
             notes = st.text_area(
-                "Additional Notes",
+                "Notes",
                 value=o.get("lamination_notes", ""),
-                height=80,
+                height=60,
                 key=f"notes_{order_id}"
             )
 
-            if st.button("💾 Save Lamination Details", key=f"save_details_{order_id}", use_container_width=True):
+            if st.button("💾 Save Details", key=f"save_details_{order_id}", use_container_width=True):
                 update(f"orders/{key}", {
                     "lamination_type": lam_type,
                     "lamination_material": material,
-                    "lamination_reel_width": reel_width,
+                    "lamination_reel_width": reel,
+                    "lamination_assigned_to": assign_to,
                     "lamination_notes": notes
                 })
                 st.success("Details Saved!")
@@ -202,49 +209,47 @@ with tab1:
 
             st.divider()
 
-            # ---------------- FILE UPLOAD ----------------
-            st.subheader("📁 Upload Lamination Output File")
 
-            upload = st.file_uploader(
+            # ---------------- UPLOAD FILE ----------------
+            st.subheader("📁 Lamination Output File")
+
+            up = st.file_uploader(
                 "Upload file",
                 type=["png", "jpg", "jpeg", "pdf"],
-                key=f"up_{order_id}"
+                key=f"upl_{order_id}"
             )
 
-            if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and upload:
-                encoded = base64.b64encode(upload.read()).decode()
+            if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and up:
+                encoded = base64.b64encode(up.read()).decode()
                 update(f"orders/{key}", {"lamination_file": encoded})
                 st.success("File saved!")
                 st.rerun()
 
             if lam_file:
                 preview("Lamination Output", lam_file)
-                download_button(
-                    "⬇️ Download Lamination Output",
-                    lam_file,
-                    order_id,
-                    "lamination",
-                    "dl_lam"
-                )
+                download_button("⬇ Download", lam_file, order_id, "lamination", "dl_lam")
 
             st.divider()
 
-            # ---------------- PRINT BUTTON ----------------
-            print_id = f"print_section_{order_id}"
+
+            # ---------------- PRINT REPORT ----------------
+            section_id = f"print_{order_id}"
+
             st.markdown(f"""
-            <div id="{print_id}">
+            <div id="{section_id}">
                 <h2>Lamination Report — {order_id}</h2>
                 <p><b>Customer:</b> {o.get('customer')}</p>
                 <p><b>Item:</b> {o.get('item')}</p>
-                <p><b>Type:</b> {lam_type}</p>
+                <p><b>Lamination Type:</b> {lam_type}</p>
                 <p><b>Material:</b> {material}</p>
-                <p><b>Reel Width:</b> {reel_width} inches</p>
+                <p><b>Reel Width:</b> {reel} inches</p>
+                <p><b>Assigned To:</b> {assign_to}</p>
                 <p><b>Notes:</b> {notes}</p>
             </div>
             """, unsafe_allow_html=True)
 
-            if st.button("🖨 Print This Page", key=f"print_{order_id}", use_container_width=True):
-                print_section(print_id)
+            if st.button("🖨 Print", key=f"print_{order_id}", use_container_width=True):
+                trigger_print(section_id)
 
             st.divider()
 
@@ -256,10 +261,9 @@ with tab1:
                         "lamination_completed_at": datetime.now().isoformat()
                     })
                     st.balloons()
-                    st.success("Moved to DieCut!")
                     st.rerun()
             else:
-                st.warning("Finish lamination & upload file first.")
+                st.warning("Upload file & finish lamination first.")
 
 
 # -------------------
@@ -282,12 +286,6 @@ with tab2:
 
                 if lam_file:
                     preview("Lamination Output", lam_file)
-                    download_button(
-                        "⬇️ Download Output File",
-                        lam_file,
-                        order_id,
-                        "lamination",
-                        "dl_completed"
-                    )
+                    download_button("⬇ Download", lam_file, order_id, "lamination", "dl_completed")
 
                 st.divider()
