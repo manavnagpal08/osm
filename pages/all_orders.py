@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt # Import Altair for advanced charting
 from firebase import read
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, Optional, List
@@ -24,6 +25,16 @@ st.write("Deep dive into production efficiency, performance against targets, and
 # -------------------------------------
 # Target KPI for comparison
 ON_TIME_RATE_TARGET = 85.0 # Target 85% On-Time Delivery
+DATA_QUALITY_TARGET = 95.0 # Target 95% Data Quality
+
+# Define all possible production stages with their start/end keys
+PRODUCTION_STAGES = [
+    ('Design', 'started_at', 'design_completed_at'),
+    ('Printing', 'printing_started_at', 'printing_completed_at'),
+    ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
+    ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
+    ('Packing', 'packing_start', 'packing_completed_at'),
+]
 
 # -------------------------------------
 # UTILITY FUNCTIONS
@@ -74,14 +85,18 @@ def get_stage_seconds(order, start_key, end_key):
             return None
     return None
 
+def format_seconds_to_hms(seconds: float) -> str:
+    """Converts a duration in seconds to a H:M:S string format."""
+    return str(timedelta(seconds=seconds)).split('.')[0]
+
 def analyze_kpis(data_list: List[Dict[str, Any]]):
     """Calculates Cycle Time, On-Time Rate, and Avg Stage Times for a given list of orders."""
     total_cycle_time_seconds = 0
     on_time_count = 0
-    completed_count = 0
     
-    stage_time_totals = {"Design": 0.0, "Printing": 0.0, "DieCut": 0.0, "Assembly": 0.0, "Packing": 0.0}
-    stage_time_counts = {"Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, "Packing": 0}
+    stage_time_totals = {stage[0]: 0.0 for stage in PRODUCTION_STAGES}
+    stage_time_counts = {stage[0]: 0 for stage in PRODUCTION_STAGES}
+    stage_performance = {stage[0]: {'fastest': (float('inf'), None), 'slowest': (0.0, None)} for stage in PRODUCTION_STAGES}
 
     completed_orders = [o for o in data_list if o.get('stage') == 'Completed']
     completed_count = len(completed_orders)
@@ -91,13 +106,15 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
             received_str = order.get('received')
             completed_str = order.get('dispatched_at') or order.get('packing_completed_at') 
             due_str = order.get('due')
+            order_id = order.get('order_id', 'Unknown')
 
             # 1. Total Cycle Time & On-Time Check
             if received_str and completed_str:
                 try:
                     received_dt = datetime.fromisoformat(received_str)
                     completed_dt = datetime.fromisoformat(completed_str)
-                    total_cycle_time_seconds += (completed_dt - received_dt).total_seconds()
+                    cycle_time_seconds = (completed_dt - received_dt).total_seconds()
+                    total_cycle_time_seconds += cycle_time_seconds
                     
                     if due_str:
                         due_dt = datetime.fromisoformat(due_str)
@@ -106,24 +123,21 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
                 except:
                     pass 
             
-            # 2. Individual Stage Times
-            stages_map = [
-                ('Design', 'started_at', 'design_completed_at'),
-                ('Printing', 'printing_started_at', 'printing_completed_at'),
-                ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
-                ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
-                ('Packing', 'packing_start', 'packing_completed_at'),
-            ]
-            
-            for stage, start_key, end_key in stages_map:
+            # 2. Individual Stage Times & Performance Tracking
+            for stage, start_key, end_key in PRODUCTION_STAGES:
                 s = get_stage_seconds(order, start_key, end_key)
                 if s is not None:
                     stage_time_totals[stage] += s
                     stage_time_counts[stage] += 1
                     
+                    # Track fastest/slowest
+                    if s < stage_performance[stage]['fastest'][0]:
+                        stage_performance[stage]['fastest'] = (s, order_id)
+                    if s > stage_performance[stage]['slowest'][0]:
+                        stage_performance[stage]['slowest'] = (s, order_id)
 
         avg_cycle_time_seconds = total_cycle_time_seconds / completed_count
-        avg_cycle_time = str(timedelta(seconds=avg_cycle_time_seconds)).split('.')[0]
+        avg_cycle_time = format_seconds_to_hms(avg_cycle_time_seconds)
         on_time_rate = (on_time_count / completed_count) * 100
         
         # Calculate Average Stage Times (H:M:S string)
@@ -131,8 +145,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
         for stage, total_s in stage_time_totals.items():
             count = stage_time_counts[stage]
             if count > 0:
-                avg_s = total_s / count
-                avg_stage_times[stage] = str(timedelta(seconds=avg_s)).split('.')[0]
+                avg_stage_times[stage] = format_seconds_to_hms(total_s / count)
             else:
                 avg_stage_times[stage] = "N/A"
                 
@@ -149,6 +162,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
         "avg_stage_times": avg_stage_times,
         "stage_time_totals": stage_time_totals,
         "stage_time_counts": stage_time_counts,
+        "stage_performance": stage_performance,
     }
 
 
@@ -161,19 +175,46 @@ if not orders or not isinstance(orders, dict):
     st.warning("No orders found.")
     st.stop()
 
+all_orders_list = list(orders.values())
+total_orders = len(all_orders_list)
+overall_kpis = analyze_kpis(all_orders_list)
+
+
 # -------------------------------------
 # KPI & DATA QUALITY METRICS
 # -------------------------------------
-all_orders_list = list(orders.values())
-overall_kpis = analyze_kpis(all_orders_list)
 
-# Data Quality Check
+# Data Quality Check (Rerun from pages/all_orders logic for consistency)
 missing_data_count = 0
 for o in all_orders_list:
-    if not o.get('received') or not o.get('due') or not o.get('customer') or not o.get('qty'):
+    # Use a defined set of critical keys (can be expanded)
+    critical_keys = ['received', 'due', 'customer', 'qty', 'item']
+    if any(not o.get(k) for k in critical_keys):
         missing_data_count += 1
-data_quality_percent = f"{(1 - (missing_data_count / total_orders)) * 100:.1f}%"
-data_quality_delta = f"-{missing_data_count} orders missing critical fields"
+
+data_quality_score = (1 - (missing_data_count / total_orders)) * 100 if total_orders > 0 else 0.0
+data_quality_percent = f"{data_quality_score:.1f}%"
+data_quality_delta = f"{data_quality_score - DATA_QUALITY_TARGET:.1f}% vs Target"
+
+# SLA Violation Count (using a 7-day/168h SLA)
+sla_violation_count = 0
+for o in overall_kpis['completed_orders']: # Need completed orders list here, but it's not exposed directly from analyze_kpis
+    # Re-calculate completed orders list temporarily
+    received_str = o.get('received')
+    completed_str = o.get('dispatched_at') or o.get('packing_completed_at') 
+    
+    if received_str and completed_str:
+        try:
+            received_dt = datetime.fromisoformat(received_str)
+            completed_dt = datetime.fromisoformat(completed_str)
+            cycle_time_hours = (completed_dt - received_dt).total_seconds() / 3600
+            if cycle_time_hours > 168:
+                sla_violation_count += 1
+        except:
+            pass # Skip orders with time errors
+
+# Calculate a weighted Efficiency Score (e.g., 70% OTD + 30% DQ)
+efficiency_score = (overall_kpis['on_time_rate'] * 0.7) + (data_quality_score * 0.3)
 
 
 # -------------------------------------
@@ -183,10 +224,15 @@ data_quality_delta = f"-{missing_data_count} orders missing critical fields"
 on_time_rate = overall_kpis['on_time_rate']
 on_time_delta = f"{on_time_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
+
 col1.metric("Total Orders", total_orders, "Total in System")
-col2.metric("Orders In Progress", overall_kpis['completed_count'] - total_orders, "Currently Active", delta_color="normal")
-col3.metric("Avg. Cycle Time", overall_kpis['avg_cycle_time'], "Received to Final")
+col2.metric("Orders Completed", overall_kpis['completed_count'], "Total Finished")
+col3.metric(
+    "Efficiency Score (WIP)", 
+    f"{efficiency_score:.1f}", 
+    help="Weighted Score: 70% OTD Rate + 30% Data Quality"
+)
 col4.metric(
     "On-Time Delivery Rate", 
     f"{on_time_rate:.1f}%", 
@@ -194,10 +240,16 @@ col4.metric(
     delta_color="normal" if on_time_rate >= ON_TIME_RATE_TARGET else "inverse"
 )
 col5.metric(
+    "SLA Violation Count",
+    sla_violation_count,
+    delta="Completed orders exceeding 7 days",
+    delta_color="inverse" if sla_violation_count > 0 else "normal"
+)
+col6.metric(
     "Data Quality Score", 
     data_quality_percent, 
     delta=data_quality_delta, 
-    delta_color="inverse"
+    delta_color="normal" if data_quality_score >= DATA_QUALITY_TARGET else "inverse"
 )
 
 st.divider()
@@ -257,20 +309,71 @@ with col_seg2:
 
 st.divider()
 
-# Visualization 1: Order Distribution
-stage_counts: Dict[str, int] = {
-    "Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, 
-    "Packing": 0, "Dispatch": 0, "Completed": 0
-}
-for o in orders.values():
-    stage = o.get('stage', 'Unknown')
-    if stage in stage_counts:
-        stage_counts[stage] += 1
+# -------------------------------------
+# BOTTLENECK & STAGE PERFORMANCE ANALYSIS
+# -------------------------------------
+st.subheader("Bottleneck and Stage Performance ")
+
+avg_stage_times_seconds = {}
+for stage, total_s in overall_kpis['stage_time_totals'].items():
+    count = overall_kpis['stage_time_counts'].get(stage, 0)
+    if count > 0:
+        avg_stage_times_seconds[stage] = total_s / count
+
+if avg_stage_times_seconds:
+    # 3. Bottleneck Detection
+    bottleneck_stage = max(avg_stage_times_seconds, key=avg_stage_times_seconds.get)
+    bottleneck_time = format_seconds_to_hms(avg_stage_times_seconds[bottleneck_stage])
+    
+    st.markdown(f"### 🛑 Current Bottleneck: **{bottleneck_stage}**")
+    st.markdown(f"The **{bottleneck_stage}** stage has the highest average duration: **{bottleneck_time}**.")
+
+    st.markdown("---")
+    
+    # 4. Fastest & Slowest Orders (Top Delays)
+    st.markdown("### Top Delays and Exceptional Performance (Fastest/Slowest Orders)")
+    
+    performance_table = []
+    for stage in PRODUCTION_STAGES:
+        stage_name = stage[0]
+        perf = overall_kpis['stage_performance'][stage_name]
+        
+        fastest_s, fastest_id = perf['fastest']
+        slowest_s, slowest_id = perf['slowest']
+        
+        # Only show stages with recorded data
+        if overall_kpis['stage_time_counts'][stage_name] > 0:
+            performance_table.append({
+                "Stage": stage_name,
+                "Fastest Time": format_seconds_to_hms(fastest_s) if fastest_s != float('inf') else "N/A",
+                "Fastest Order": fastest_id or "N/A",
+                "Slowest Time (Delay)": format_seconds_to_hms(slowest_s) if slowest_s > 0 else "N/A",
+                "Slowest Order": slowest_id or "N/A",
+                "Total Orders Analyzed": overall_kpis['stage_time_counts'][stage_name]
+            })
+
+    st.dataframe(pd.DataFrame(performance_table), use_container_width=True, hide_index=True)
+
+
+st.divider()
+
+# -------------------------------------
+# VISUALIZATIONS
+# -------------------------------------
 
 col_viz1, col_viz2 = st.columns(2)
 
 with col_viz1:
     st.subheader("Order Count Distribution")
+    stage_counts: Dict[str, int] = {
+        "Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, 
+        "Packing": 0, "Dispatch": 0, "Completed": 0
+    }
+    for o in orders.values():
+        stage = o.get('stage', 'Unknown')
+        if stage in stage_counts:
+            stage_counts[stage] += 1
+            
     chart_data = pd.DataFrame(
         list(stage_counts.items()),
         columns=['Stage', 'Count']
@@ -278,25 +381,34 @@ with col_viz1:
     chart_data = chart_data.set_index('Stage')
     st.bar_chart(chart_data)
 
-# Visualization 2: Average Stage Time
+# Visualization 2: Average Stage Time / Delay Heat-Map
 with col_viz2:
     if overall_kpis['completed_count'] > 0 and any(overall_kpis['stage_time_counts'].values()):
-        avg_time_chart_data = {
-            'Stage': [],
-            'Avg_Seconds': []
-        }
+        
+        avg_time_chart_data = []
         for stage, total_s in overall_kpis['stage_time_totals'].items():
             count = overall_kpis['stage_time_counts'][stage]
             if count > 0:
-                avg_time_chart_data['Stage'].append(stage)
-                avg_time_chart_data['Avg_Seconds'].append(total_s / count)
+                avg_time_chart_data.append({
+                    'Stage': stage,
+                    # Convert seconds to minutes for better visualization scale
+                    'Avg Time (Min)': (total_s / count) / 60 
+                })
 
-        avg_df = pd.DataFrame(avg_time_chart_data).set_index('Stage')
-        # Convert seconds to minutes for better visualization scale
-        avg_df['Avg Time (Min)'] = avg_df['Avg_Seconds'] / 60 
+        avg_df = pd.DataFrame(avg_time_chart_data)
         
-        st.subheader("Avg. Time Spent Per Stage (Completed Orders)")
-        st.bar_chart(avg_df['Avg Time (Min)'])
+        st.subheader("Avg. Time Spent Per Stage (Delay Heat-Map)")
+        
+        # Create Altair Heatmap/Bar chart where color represents the time
+        chart = alt.Chart(avg_df).mark_bar().encode(
+            x=alt.X('Stage', sort=list(avg_stage_times_seconds.keys())),
+            y=alt.Y('Avg Time (Min)', title='Average Duration (Minutes)'),
+            color=alt.Color('Avg Time (Min)', scale=alt.Scale(range='heatmap', domain=[avg_df['Avg Time (Min)'].min(), avg_df['Avg Time (Min)'].max()])),
+            tooltip=['Stage', alt.Tooltip('Avg Time (Min)', format='.2f')]
+        ).properties(
+            title="Stage Time Breakdown (Highest time is the Bottleneck)"
+        )
+        st.altair_chart(chart, use_container_width=True)
     else:
         st.info("Insufficient data for Average Stage Time analysis.")
 
@@ -400,7 +512,9 @@ for key, o in orders.items():
             continue
 
     elif quick_filter == "Data Quality Issues":
-        if o.get('received') and o.get('due') and o.get('customer') and o.get('qty'):
+        # Check for any critical key missing (same logic as used for KPI calculation)
+        critical_keys = ['received', 'due', 'customer', 'qty', 'item']
+        if not any(not o.get(k) for k in critical_keys):
             continue
             
     # --- STANDARD FILTERS ---
