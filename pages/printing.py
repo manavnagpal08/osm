@@ -1,16 +1,14 @@
 import streamlit as st
 from firebase import read, update
-from datetime import datetime
 import base64
+from datetime import datetime
+import imghdr
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
 st.set_page_config(page_title="Printing Department", layout="wide", page_icon="🖨️")
 
-# ---------------------------------------------------------
+# ---------------------------
 # ROLE CHECK
-# ---------------------------------------------------------
+# ---------------------------
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
@@ -18,282 +16,210 @@ if st.session_state["role"] not in ["printing", "admin"]:
     st.error("❌ You do not have permission to access this page.")
     st.stop()
 
-st.title("🖨️ Printing Department Dashboard")
-st.caption("Manage printing workflow, uploads, and time tracking.")
+st.title("🖨️ Printing Department")
+st.caption("Manage print jobs, preview artwork, and upload mockup files.")
 
-# ---------------------------------------------------------
+# ---------------------------
 # LOAD ORDERS
-# ---------------------------------------------------------
+# ---------------------------
 orders = read("orders") or {}
 
-pending_bag = {}
-pending_box = {}
-completed_print = {}
+pending = {}
+completed = {}
 
 for key, o in orders.items():
     if not isinstance(o, dict):
         continue
 
     if o.get("stage") == "Printing":
-        if o.get("product_type") == "Bag":
-            pending_bag[key] = o
-        else:
-            pending_box[key] = o
-
+        pending[key] = o
     elif o.get("printing_completed_at"):
-        completed_print[key] = o
+        completed[key] = o
 
-# ---------------------------------------------------------
+
+# ---------------------------
 # HELPERS
-# ---------------------------------------------------------
-def encode_file(uploaded):
-    if uploaded:
-        uploaded.seek(0)
-        return base64.b64encode(uploaded.read()).decode("utf-8")
-    return None
+# ---------------------------
+def detect_file_type(b64_data: str):
+    """Detect file extension & MIME type from base64 data."""
+    raw = base64.b64decode(b64_data)
 
-def preview_file(b64_data, label):
+    # Detect image
+    img_type = imghdr.what(None, raw)
+    if img_type:
+        return f".{img_type}", f"image/{img_type}", raw
+
+    # PDF detection
+    if raw[:4] == b"%PDF":
+        return ".pdf", "application/pdf", raw
+
+    # AI / EPS are binary, treat as octet-stream
+    return ".bin", "application/octet-stream", raw
+
+
+def preview_file(label, b64_data):
+    """Display preview of image/PDF."""
     if not b64_data:
+        st.warning(f"No {label} uploaded yet.")
         return
-    try:
-        decoded = base64.b64decode(b64_data)
-        st.image(decoded, caption=f"{label} Preview", use_container_width=True)
-    except:
-        pass
-    try:
-        pdf_iframe = f"""
-        <iframe src="data:application/pdf;base64,{b64_data}" width="100%" height="900px" style="border-radius:12px;"></iframe>
-        """
-        st.markdown(pdf_iframe, unsafe_allow_html=True)
-    except:
-        pass
 
-def download_button(file_data, filename, label, key):
-    if not file_data:
-        return
-    decoded = base64.b64decode(file_data)
-    st.download_button(label, decoded, file_name=filename, key=key)
+    ext, mime, raw = detect_file_type(b64_data)
 
-# ---------------------------------------------------------
-# FILE CARD
-# ---------------------------------------------------------
-def file_card(col, order_id, file_key, label, allowed, db_key):
-    with col:
-        files = orders[db_key].get("printing_files", {})
-        exists = files.get(file_key)
+    st.markdown(f"### 📄 {label} Preview")
 
-        st.markdown(f"**{'✔️' if exists else '➕'} {label}**")
+    if mime.startswith("image/"):
+        st.image(raw, use_column_width=True)
 
-        upload = st.file_uploader(
-            f"Upload {label}", type=allowed, label_visibility="collapsed", key=f"up_pr_{file_key}_{order_id}"
+    elif mime == "application/pdf":
+        st.download_button(
+            label="⬇️ Download PDF",
+            data=raw,
+            file_name=f"{label}{ext}",
+            mime=mime
         )
+        st.markdown(f"[Open PDF]({st.experimental_get_query_params()})")
 
-        if st.button(f"💾 Save {label}", key=f"save_pr_{file_key}_{order_id}", disabled=not upload):
-            encoded = encode_file(upload)
-            fset = orders[db_key].get("printing_files", {})
-            fset[file_key] = encoded
-            update(f"orders/{db_key}", {"printing_files": fset})
-            st.toast(f"{label} saved!")
-            st.rerun()
+    return raw, ext, mime
 
-        if exists:
-            preview_file(exists, label)
 
-        download_button(exists, f"{order_id}_{file_key}.file", f"⬇️ Download {label}", f"dl_pr_{file_key}_{order_id}")
-
-# ---------------------------------------------------------
+# ---------------------------
 # MAIN TABS
-# ---------------------------------------------------------
-tab_bag, tab_box, tab_done = st.tabs([
-    f"👜 Bag Printing ({len(pending_bag)})",
-    f"📦 Box Printing ({len(pending_box)})",
-    f"✅ Completed ({len(completed_print)})"
+# ---------------------------
+tab1, tab2 = st.tabs([
+    f"🛠️ Pending Printing ({len(pending)})",
+    f"✅ Completed Printing ({len(completed)})"
 ])
 
-# ---------------------------------------------------------
-# BAG PRINTING
-# ---------------------------------------------------------
-with tab_bag:
-    st.header("👜 Bag Printing Queue")
+# ---------------------------
+# TAB 1 - PENDING PRINTING
+# ---------------------------
+with tab1:
 
-    if not pending_bag:
-        st.success("No Bag orders pending for printing.")
+    if not pending:
+        st.success("🎉 No pending printing jobs!")
+    else:
+        for key, o in pending.items():
 
-    for key, order in pending_bag.items():
-        order_id = order.get("order_id")
+            order_id = o.get("order_id")
+            design_files = o.get("design_files", {})
+            mockup_files = o.get("printing_mockups", {})
 
-        with st.container(border=True):
-            st.markdown(f"### **{order_id}** — {order.get('customer')}")
-            st.markdown(f"**Item:** {order.get('item')}")
+            with st.container(border=True):
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Qty", order.get("qty"))
-            c2.metric("Priority", order.get("priority"))
-            c3.metric("Due", order.get("due"))
+                st.subheader(f"🖨️ Order {order_id}")
+                st.markdown(f"**Customer:** {o.get('customer')}")
 
-            st.divider()
+                st.divider()
 
-            # TIME + FILES + NEXT
-            tcol, fcol, ncol = st.columns([1.2, 3, 2])
+                col1, col2 = st.columns(2)
 
-            # TIME
-            with tcol:
-                st.subheader("⏱️ Time")
+                # ----------------------------
+                # PRINT READY FILE (from design)
+                # ----------------------------
+                with col1:
+                    st.subheader("🎨 Print-Ready File (from Design)")
 
-                start = order.get("printing_start_time")
-                end = order.get("printing_end_time")
+                    final_file = design_files.get("final")
 
-                if not start:
-                    if st.button("▶️ Start", key=f"pr_start_{order_id}"):
-                        update(f"orders/{key}", {"printing_start_time": datetime.now().isoformat()})
+                    if not final_file:
+                        st.error("❌ No final design file found!")
+                    else:
+                        raw, ext, mime = detect_file_type(final_file)
+
+                        # Preview (image/pdf)
+                        preview_file("Print Ready File", final_file)
+
+                        # Download fixed
+                        st.download_button(
+                            label="⬇️ Download Print-Ready File",
+                            data=raw,
+                            file_name=f"{order_id}_print_ready{ext}",
+                            mime=mime,
+                            use_container_width=True
+                        )
+
+                # ----------------------------
+                # MOCKUP FILE UPLOAD
+                # ----------------------------
+                with col2:
+                    st.subheader("🖼️ Upload Mockup File")
+
+                    upload = st.file_uploader(
+                        "Upload Mockup (image/pdf)",
+                        type=["png", "jpg", "jpeg", "pdf"],
+                        key=f"mockup_{order_id}"
+                    )
+
+                    if st.button("💾 Save Mockup", use_container_width=True, key=f"save_mockup_{order_id}") and upload:
+                        mockup_encoded = base64.b64encode(upload.read()).decode()
+
+                        old_mockups = o.get("printing_mockups", {})
+                        old_mockups["mockup"] = mockup_encoded
+
+                        update(f"orders/{key}", {
+                            "printing_mockups": old_mockups
+                        })
+
+                        st.success("Mockup saved!")
                         st.rerun()
-                elif not end:
-                    if st.button("⏹️ Stop", key=f"pr_stop_{order_id}"):
-                        update(f"orders/{key}", {"printing_end_time": datetime.now().isoformat()})
-                        st.rerun()
-                else:
-                    st.success("Completed")
 
-            # FILES
-            with fcol:
-                st.subheader("📁 Files")
+                    # Show existing mockup
+                    mock_file = mockup_files.get("mockup")
+                    if mock_file:
+                        st.markdown("### Existing Mockup")
+                        preview_file("Mockup", mock_file)
 
-                f1, f2 = st.columns(2)
-                file_card(f1, order_id, "print_sheet", "Print Sheet", ["png", "jpg", "pdf"], key)
-                file_card(f2, order_id, "plate_art", "Plate Art", ["pdf", "ai", "zip"], key)
+                st.divider()
 
-            # NEXT
-            with ncol:
-                st.subheader("🚀 Move Next")
+                # ----------------------------
+                # COMPLETE BUTTON
+                # ----------------------------
+                if st.button(f"🚀 Move to Lamination", type="primary", key=f"done_{order_id}", use_container_width=True):
 
-                if st.button("Send to Lamination", key=f"next_bag_{order_id}", type="primary"):
                     now = datetime.now().isoformat()
-
-                    start = order.get("printing_start_time")
-                    end = order.get("printing_end_time")
-
-                    if start and not end:
-                        end = now
 
                     update(f"orders/{key}", {
                         "stage": "Lamination",
-                        "printing_completed_at": now,
-                        "printing_end_time": end or now
+                        "printing_completed_at": now
                     })
 
                     st.balloons()
-                    st.toast("Sent to Lamination")
+                    st.success("Moved to Lamination!")
                     st.rerun()
 
-            st.markdown("---")
 
-# ---------------------------------------------------------
-# BOX PRINTING
-# ---------------------------------------------------------
-with tab_box:
-    st.header("📦 Box Printing Queue")
+# ---------------------------
+# TAB 2 - COMPLETED PRINTING
+# ---------------------------
+with tab2:
 
-    if not pending_box:
-        st.info("No Box orders pending for printing.")
+    if not completed:
+        st.info("No completed printing orders yet.")
+    else:
+        for key, o in completed.items():
 
-    for key, order in pending_box.items():
-        order_id = order.get("order_id")
+            order_id = o.get("order_id")
 
-        with st.container(border=True):
-            st.markdown(f"### **{order_id}** — {order.get('customer')}")
-            st.markdown(f"**Item:** {order.get('item')}")
+            with st.container(border=True):
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Qty", order.get("qty"))
-            c2.metric("Priority", order.get("priority"))
-            c3.metric("Due", order.get("due"))
+                st.markdown(f"### ✔ {order_id} — {o.get('customer')}")
+                st.caption(f"Completed at {o.get('printing_completed_at','N/A')}")
 
-            st.divider()
+                design_files = o.get("design_files", {})
+                mockup_files = o.get("printing_mockups", {})
 
-            tcol, fcol, ncol = st.columns([1.2, 3, 2])
+                st.divider()
 
-            # TIME
-            with tcol:
-                st.subheader("⏱️ Time")
+                col1, col2 = st.columns(2)
 
-                start = order.get("printing_start_time")
-                end = order.get("printing_end_time")
+                with col1:
+                    st.subheader("Print-Ready File")
+                    if design_files.get("final"):
+                        preview_file("Print Ready", design_files.get("final"))
 
-                if not start:
-                    if st.button("▶️ Start", key=f"pr_start_box_{order_id}"):
-                        update(f"orders/{key}", {"printing_start_time": datetime.now().isoformat()})
-                        st.rerun()
-                elif not end:
-                    if st.button("⏹️ Stop", key=f"pr_stop_box_{order_id}"):
-                        update(f"orders/{key}", {"printing_end_time": datetime.now().isoformat()})
-                        st.rerun()
-                else:
-                    st.success("Completed")
+                with col2:
+                    st.subheader("Mockup File")
+                    if mockup_files.get("mockup"):
+                        preview_file("Mockup", mockup_files.get("mockup"))
 
-            # FILES
-            with fcol:
-                st.subheader("📁 Files")
-
-                f1, f2 = st.columns(2)
-                file_card(f1, order_id, "print_sheet", "Print Sheet", ["png", "jpg", "pdf"], key)
-                file_card(f2, order_id, "plate_art", "Plate Art", ["pdf", "ai", "zip"], key)
-
-            # NEXT
-            with ncol:
-                st.subheader("🚀 Move Next")
-
-                if st.button("Send to Lamination", key=f"next_box_{order_id}", type="primary"):
-                    now = datetime.now().isoformat()
-
-                    start = order.get("printing_start_time")
-                    end = order.get("printing_end_time")
-
-                    if start and not end:
-                        end = now
-
-                    update(f"orders/{key}", {
-                        "stage": "Lamination",
-                        "printing_completed_at": now,
-                        "printing_end_time": end or now
-                    })
-
-                    st.balloons()
-                    st.toast("Sent to Lamination")
-                    st.rerun()
-
-            st.markdown("---")
-
-# ---------------------------------------------------------
-# COMPLETED PRINTING JOBS
-# ---------------------------------------------------------
-with tab_done:
-    st.header("✅ Completed Printing Jobs")
-
-    if not completed_print:
-        st.info("No completed printing jobs yet.")
-
-    for key, order in completed_print.items():
-        order_id = order.get("order_id")
-
-        with st.container(border=True):
-            left, right = st.columns([2, 3])
-
-            with left:
-                st.subheader(order_id)
-                st.write(order.get("customer"))
-                st.caption(f"Completed: {order.get('printing_completed_at', '-')[:10]}")
-
-            with right:
-                st.subheader("📁 Files")
-                files = order.get("printing_files", {})
-
-                for fk, label in {
-                    "print_sheet": "Print Sheet",
-                    "plate_art": "Plate Art"
-                }.items():
-                    if files.get(fk):
-                        st.markdown(f"**{label}**")
-                        preview_file(files[fk], label)
-                        download_button(files[fk], f"{order_id}_{fk}.file", "⬇️ Download", f"dl_done_{fk}_{order_id}")
-
-            st.markdown("---")
+                st.divider()
