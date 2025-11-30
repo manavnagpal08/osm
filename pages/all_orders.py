@@ -90,7 +90,10 @@ def format_seconds_to_hms(seconds: float) -> str:
     return str(timedelta(seconds=seconds)).split('.')[0]
 
 def analyze_kpis(data_list: List[Dict[str, Any]]):
-    """Calculates Cycle Time, On-Time Rate, and Avg Stage Times for a given list of orders."""
+    """
+    Calculates key production metrics, including Cycle Time, On-Time Rate,
+    and Avg Stage Times for a given list of orders.
+    """
     total_cycle_time_seconds = 0
     on_time_count = 0
     
@@ -156,6 +159,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
         
     return {
         "completed_count": completed_count,
+        "completed_orders": completed_orders, # <-- FIX: Expose the list of completed orders
         "on_time_count": on_time_count,
         "avg_cycle_time": avg_cycle_time,
         "on_time_rate": on_time_rate,
@@ -198,8 +202,8 @@ data_quality_delta = f"{data_quality_score - DATA_QUALITY_TARGET:.1f}% vs Target
 
 # SLA Violation Count (using a 7-day/168h SLA)
 sla_violation_count = 0
-for o in overall_kpis['completed_orders']: # Need completed orders list here, but it's not exposed directly from analyze_kpis
-    # Re-calculate completed orders list temporarily
+# FIX: Now using the exposed 'completed_orders' list
+for o in overall_kpis['completed_orders']: 
     received_str = o.get('received')
     completed_str = o.get('dispatched_at') or o.get('packing_completed_at') 
     
@@ -208,7 +212,8 @@ for o in overall_kpis['completed_orders']: # Need completed orders list here, bu
             received_dt = datetime.fromisoformat(received_str)
             completed_dt = datetime.fromisoformat(completed_str)
             cycle_time_hours = (completed_dt - received_dt).total_seconds() / 3600
-            if cycle_time_hours > 168:
+            # Check for violation (cycle time > 168 hours or 7 days)
+            if cycle_time_hours > 168: 
                 sla_violation_count += 1
         except:
             pass # Skip orders with time errors
