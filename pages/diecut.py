@@ -532,13 +532,3 @@ with tab2:
                 mime="application/pdf",
                 key=f"dl_slip_arch_{order_id}"
             )
-```
-eof
-
-I updated the logic on line 377 to change the `stage` to `"Assembly"`.
-
-```python
-                        update(f"orders/{key}", {
-                            "stage": "Assembly", # CHANGED
-                            "diecut_completed_at": datetime.now().isoformat()
-                        })
