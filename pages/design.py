@@ -8,37 +8,6 @@ from typing import Dict, Any, Optional
 st.set_page_config(page_title="Design Department", layout="wide", page_icon="🎨")
 
 # ------------------------------
-# MOCK FIREBASE/UTILS FUNCTIONS (For testing standalone)
-# NOTE: Replace these with your actual integration code.
-# ------------------------------
-MOCK_ORDERS_DB = {
-    "ord001": {"order_id": "ORD001", "customer": "Acme Corp", "type": "New", "product_type": "Bag", "priority": "Medium", "item": "Standard Yellow Bag", "qty": 500, "received": "2025-10-01", "due": "2025-10-15", "stage": "Design", "next_after_printing": "Assembly", "customer_phone": "555-1234", "customer_email": "acme@test.com"},
-    "ord002": {"order_id": "ORD002", "customer": "Beta Solutions", "type": "New", "product_type": "Box", "priority": "High", "item": "Premium Black Gift Box", "qty": 100, "received": "2025-10-05", "due": "2025-10-12", "stage": "Design", "next_after_printing": "DieCut", "design_start_time": "2025-11-30T10:00:00", "customer_phone": "555-5678", "customer_email": "beta@test.com"},
-    "ord003": {"order_id": "ORD003", "customer": "Acme Corp", "type": "Repeat", "product_type": "Bag", "priority": "Low", "item": "Custom Blue Logo Bag", "qty": 1000, "received": "2025-11-01", "due": "2025-11-20", "stage": "Assembly", "design_completed_at": "2025-11-25T09:00:00", "design_start_time": "2025-11-24T10:00:00", "design_end_time": "2025-11-24T12:30:00", "next_after_printing": "Assembly", "customer_phone": "555-1234", "customer_email": "acme@test.com"}
-}
-def read(collection_name):
-    if collection_name == "orders": return MOCK_ORDERS_DB
-    return {}
-def update(path, data):
-    print(f"--- UPDATING: {path} with {data} ---")
-    # Mock update logic (simplified)
-    parts = path.split('/')
-    if parts[0] == 'orders' and len(parts) >= 2:
-        order_key = parts[1]
-        current_data = MOCK_ORDERS_DB.get(order_key, {})
-        if len(parts) == 2:
-            current_data.update(data)
-        elif len(parts) == 3 and parts[2] == 'design_files':
-             # Special handling for nested design_files update
-            current_data['design_files'] = current_data.get('design_files', {})
-            current_data['design_files'].update(data)
-        MOCK_ORDERS_DB[order_key] = current_data
-# MOCKING LOGIN FOR DEMO
-if "role" not in st.session_state: st.session_state["role"] = "design"
-# ------------------------------
-
-
-# ------------------------------
 # ROLE CHECK
 # ------------------------------
 if "role" not in st.session_state:
@@ -49,7 +18,7 @@ if st.session_state["role"] not in ["design", "admin"]:
     st.stop()
 
 st.title("🎨 Design Department Dashboard")
-st.caption("Manage artwork creation, track time, and transition finished designs to production.")
+st.caption("Centralized hub for managing artwork, tracking time, and transitioning orders.")
 
 # ------------------------------
 # LOAD ORDERS & CATEGORIZE
@@ -78,264 +47,224 @@ def encode_file(uploaded: Optional[Any]) -> Optional[str]:
         return base64.b64encode(uploaded.read()).decode("utf-8")
     return None
 
-def download_button(file_data: Optional[str], filename: str, order_id: str):
-    """Generates a download button for base64 encoded data."""
+def download_button_ui(file_data: Optional[str], filename: str, label: str, key: str):
+    """Generates a download button."""
     if not file_data:
         return
+    decoded = base64.b64decode(file_data)
+
+    st.download_button(
+        label=label,
+        data=decoded,
+        file_name=filename,
+        key=key,
+        mime="application/octet-stream",
+        use_container_width=True
+    )
+
+def calculate_time_diff(start: Optional[str], end: Optional[str]) -> str:
+    """Calculates and formats the time difference."""
+    if start and end:
+        try:
+            t1 = datetime.fromisoformat(start)
+            t2 = datetime.fromisoformat(end)
+            diff = t2 - t1
+            # Format to drop milliseconds
+            return f"Total: **{str(diff).split('.')[0]}**" 
+        except:
+            return "Time calc error."
+    elif start and not end:
+        return "Time Running..."
+    return "Not Started."
+
+# ----------------------------------------------------
+# 📌 MAIN VIEW: TABS
+# ----------------------------------------------------
+
+tab_pending, tab_completed = st.tabs([
+    f"🛠️ Pending Workload ({len(pending_orders)})", 
+    f"✅ Completed Designs ({len(completed_orders)})"
+])
+
+# ----------------------------------------------------
+# TAB 1: PENDING WORKLOAD
+# ----------------------------------------------------
+with tab_pending:
+    st.header(f"Orders Awaiting Design ({len(pending_orders)})")
     
-    try:
-        decoded = base64.b64decode(file_data)
-        st.download_button(
-            label=f"⬇️ Download {filename}",
-            data=decoded,
-            file_name=filename,
-            key=f"dl_{order_id}_{filename}"
-        )
-    except Exception as e:
-        st.error(f"Error decoding file: {e}")
-
-# ----------------------------------------------------
-# 📌 SIDEBAR: FILTER & SELECT ORDER
-# ----------------------------------------------------
-
-# --- Filtering ---
-st.sidebar.header("Filter & Select Order")
-
-filter_choice = st.sidebar.radio(
-    "View",
-    ["Pending Orders", "Completed Designs"],
-    index=0 # Default to Pending
-)
-
-if filter_choice == "Pending Orders":
-    show_orders = pending_orders
-    st.sidebar.info(f"**{len(show_orders)}** Pending")
+    if not pending_orders:
+        st.info("No orders are currently in the Design stage. Great work!")
+    
     # Sort pending orders by priority and received date
-    sorted_items = sorted(
-        show_orders.items(),
+    sorted_pending = sorted(
+        pending_orders.items(),
         key=lambda item: (
             {"High": 0, "Medium": 1, "Low": 2}.get(item[1].get("priority", "Medium"), 1), 
             item[1].get("received", "9999-12-31")
         )
     )
-else:
-    show_orders = completed_orders
-    st.sidebar.success(f"**{len(show_orders)}** Completed")
-    # Sort completed by completion time (newest first)
-    sorted_items = sorted(
-        show_orders.items(),
-        key=lambda item: item[1].get("design_completed_at", "0000-01-01"),
-        reverse=True
-    )
 
-order_options = {}
-for key, order in sorted_items:
-    label = f"#{order.get('order_id')} - {order.get('customer')} ({order.get('priority')})"
-    order_options[label] = key
-
-# --- Selection ---
-selected_label = st.sidebar.selectbox(
-    "Select Order for Details",
-    options=["--- Select an Order ---"] + list(order_options.keys())
-)
-
-st.sidebar.divider()
-
-selected_order_key = order_options.get(selected_label)
-selected_order = orders.get(selected_order_key) if selected_order_key else None
-
-# ----------------------------------------------------
-# 📌 MAIN CONTENT: DETAIL VIEW
-# ----------------------------------------------------
-
-if not selected_order:
-    st.info("Select an order from the sidebar to view details and begin work.")
-else:
-    # --- Display Header ---
-    st.header(f"Order Details: #{selected_order['order_id']}")
-    st.subheader(f"{selected_order['item']}")
-    
-    col_info_1, col_info_2, col_info_3 = st.columns(3)
-    
-    col_info_1.metric("Customer", selected_order['customer'])
-    col_info_2.metric("Product Type", selected_order['product_type'])
-    col_info_3.metric("Priority", selected_order['priority'])
-    
-    st.divider()
-    
-    order_key = selected_order_key # The Firebase path key
-
-    # ------------------------------------
-    # TIME TRACKING (In a dedicated container)
-    # ------------------------------------
-    with st.container(border=True):
-        st.subheader("⏱️ Time Tracking & Status")
-        col_start, col_end, col_total, col_status = st.columns(4)
-
-        start_time = selected_order.get("design_start_time")
-        end_time = selected_order.get("design_end_time")
-
-        current_stage = selected_order.get("stage", "Design")
+    for key, order in sorted_pending:
+        order_id = order.get("order_id", "Unknown")
         
-        # Start/Stop Buttons Logic
-        with col_start:
-            if current_stage == "Design" and not start_time:
-                if st.button(f"▶️ Start Work", key=f"start_{order_key}", type="primary", use_container_width=True):
-                    update(f"orders/{order_key}", {"design_start_time": datetime.now().isoformat()})
-                    st.rerun()
-            elif start_time:
-                col_start.success("Work Started")
-        
-        with col_end:
-            if current_stage == "Design" and start_time and not end_time:
-                if st.button(f"⏹️ End Work", key=f"end_{order_key}", type="secondary", use_container_width=True):
-                    update(f"orders/{order_key}", {"design_end_time": datetime.now().isoformat()})
-                    st.rerun()
-            elif end_time:
-                col_end.success("Work Ended")
+        # Use a container for each order card instead of expander
+        with st.container(border=True):
+            
+            # --- CARD HEADER: ID, Customer, Item ---
+            st.markdown(f"## **{order_id}** — {order.get('customer')}")
+            st.markdown(f"**Item:** *{order.get('item', 'No description')}*")
+            
+            # --- METRICS & SPECS ---
+            col_specs_1, col_specs_2, col_specs_3, col_specs_4 = st.columns(4)
+            
+            col_specs_1.metric("Priority", order.get('priority', 'Medium'))
+            col_specs_2.metric("Product", order.get('product_type', 'N/A'))
+            col_specs_3.metric("Qty", order.get('qty', 'N/A'))
+            col_specs_4.metric("Due Date", order.get('due', 'N/A'))
+            
+            st.markdown(f"**Required Specs:** Foil=`{order.get('foil_id', '-')}`, SpotUV=`{order.get('spotuv_id', '-')}`, Size=`{order.get('size_id', '-')}`")
 
-        # Status and Total Time Calculation
-        with col_status:
-            if current_stage == "Design":
-                 col_status.warning("STATUS: Pending")
-            else:
-                 col_status.success(f"STATUS: Moved to {current_stage}")
+            st.divider()
+            
+            # --- WORKFLOW AREA (Time, Files, Notes) ---
+            
+            col_time, col_files, col_notes = st.columns([1.5, 3, 2.5])
+            
+            # 1. TIME TRACKING
+            with col_time:
+                st.subheader("⏱️ Tracking")
+                start = order.get("design_start_time")
+                end = order.get("design_end_time")
 
-        with col_total:
-            if start_time and end_time:
-                try:
-                    t1 = datetime.fromisoformat(start_time)
-                    t2 = datetime.fromisoformat(end_time)
-                    diff = t2 - t1
-                    col_total.metric("Time Taken", str(diff).split('.')[0])
-                except:
-                    col_total.error("Calc Error")
-            elif start_time and current_stage == "Design":
-                col_total.info("Time Running...")
-    
-    st.markdown("---")
+                if not start:
+                    if st.button(f"▶️ Start Work", key=f"start_{order_id}", use_container_width=True, type="primary"):
+                        update(f"orders/{key}", {"design_start_time": datetime.now().isoformat()})
+                        st.rerun()
+                    st.caption("Status: Waiting to Start")
+                elif not end:
+                    if st.button(f"⏹️ End Work", key=f"end_{order_id}", use_container_width=True, type="secondary"):
+                        update(f"orders/{key}", {"design_end_time": datetime.now().isoformat()})
+                        st.rerun()
+                    st.caption(f"Started: {datetime.fromisoformat(start).strftime('%H:%M')}")
+                else:
+                    st.success("Work Completed")
+                    st.caption(calculate_time_diff(start, end))
 
+            # 2. FILE UPLOADS/DOWNLOADS
+            design_files = order.get("design_files", {})
+            with col_files:
+                st.subheader("📁 Files")
+                col_file_ref, col_file_temp, col_file_final = st.columns(3)
 
-    # ------------------------------------
-    # FILE UPLOADS & DOWNLOADS
-    # ------------------------------------
-    with st.container(border=True):
-        st.subheader("📁 Design Files")
-        st.caption("Upload and manage the necessary files for this order.")
-        
-        design_files: Dict[str, Optional[str]] = selected_order.get("design_files", {})
-        
-        col_ref, col_temp, col_final = st.columns(3)
-        
-        # --- Helper function for file section content ---
-        def render_file_section(col, type_key, display_name):
-            with col:
-                st.markdown(f"#### {display_name}")
+                # --- Helper for File Actions ---
+                def render_file_card(c, file_key, label, type_list, is_required=False):
+                    with c:
+                        status_icon = "✔️" if design_files.get(file_key) else ("⚠️" if is_required else "➖")
+                        st.markdown(f"**{status_icon} {label}**")
+                        
+                        uploaded_file = st.file_uploader(
+                            f"Upload {label}",
+                            type=type_list,
+                            key=f"up_{file_key}_{order_id}",
+                            label_visibility="collapsed"
+                        )
+                        
+                        # Save action
+                        if st.button(f"💾 Save {label}", key=f"save_{file_key}_{order_id}", use_container_width=True, disabled=not uploaded_file):
+                            encoded = encode_file(uploaded_file)
+                            if encoded:
+                                update_path = f"orders/{key}"
+                                # Need to merge the design_files object since firebase update might overwrite the whole path
+                                current_files = orders.get(key, {}).get("design_files", {})
+                                current_files[file_key] = encoded
+                                update(update_path, {"design_files": current_files})
+                                st.toast(f"{label} saved!")
+                                st.rerun()
+
+                        # Download button
+                        download_button_ui(
+                            design_files.get(file_key), 
+                            f"{order_id}_{file_key}.file", 
+                            "⬇️ Download", 
+                            f"dl_{file_key}_{order_id}"
+                        )
+
+                render_file_card(col_file_ref, "reference", "Reference", ["png", "jpg", "pdf", "zip"])
+                render_file_card(col_file_temp, "template", "Template", ["ai", "eps", "pdf", "zip"])
+                render_file_card(col_file_final, "final", "Final Art", ["ai", "eps", "pdf", "zip"], is_required=True)
+            
+            # 3. NOTES & ACTIONS
+            with col_notes:
+                st.subheader("📝 Actions")
                 
-                # File Uploader
-                uploaded_file = st.file_uploader(
-                    f"Upload New {display_name}",
-                    type=["png","jpg","jpeg","pdf","zip","ai","eps","svg"],
-                    key=f"upload_{type_key}_{order_key}",
+                # Notes Area (read-only for non-admin on admin_instructions)
+                is_admin = st.session_state["role"] == "admin"
+                
+                designer_note = st.text_area(
+                    "Designer Notes",
+                    value=order.get("design_notes", ""),
+                    height=70,
+                    key=f"notes_{order_id}",
                     label_visibility="collapsed"
                 )
                 
-                # Save Button
-                if st.button(f"💾 Save {display_name}", key=f"save_{type_key}_{order_key}", use_container_width=True, disabled=current_stage != "Design"):
-                    encoded = encode_file(uploaded_file)
-                    if encoded:
-                        design_files[type_key] = encoded
-                        # Update the specific nested dictionary
-                        update(f"orders/{order_key}", {"design_files": design_files}) 
-                        st.toast(f"{display_name} saved!")
-                        st.rerun()
-                
-                # Status and Download
-                file_data = design_files.get(type_key)
-                if file_data:
-                    st.success("File Uploaded ✔")
-                    download_button(file_data, f"{selected_order['order_id']}_{type_key}.file", selected_order['order_id'])
-                else:
-                    st.warning("File Missing ❗")
-
-        render_file_section(col_ref, "reference", "Reference Design")
-        render_file_section(col_temp, "template", "Drawing Template")
-        render_file_section(col_final, "final", "Final Artwork")
-        
-    st.markdown("---")
-
-    # ------------------------------------
-    # INSTRUCTIONS & NOTES
-    # ------------------------------------
-    with st.container(border=True):
-        st.subheader("📝 Instructions & Communication")
-        
-        col_design_note, col_admin_note = st.columns(2)
-        
-        # Use st.session_state to manage text area content across reruns for smoother saving
-        if f"notes_{order_key}" not in st.session_state:
-             st.session_state[f"notes_{order_key}"] = selected_order.get("design_notes", "")
-        if f"admin_{order_key}" not in st.session_state:
-             st.session_state[f"admin_{order_key}"] = selected_order.get("admin_instructions", "")
-
-        with col_design_note:
-            designer_note = st.text_area(
-                "Designer Notes (Instructions for Production)",
-                value=st.session_state[f"notes_{order_key}"],
-                height=150,
-                key=f"notes_{order_key}",
-                disabled=current_stage != "Design"
-            )
-        
-        with col_admin_note:
-            is_admin = st.session_state["role"] == "admin"
-            admin_note = st.text_area(
-                "Admin/Sales Instructions",
-                value=st.session_state[f"admin_{order_key}"],
-                height=150,
-                key=f"admin_{order_key}",
-                disabled=current_stage != "Design" and not is_admin,
-            )
-
-        if st.button(f"💾 Save All Notes", key=f"savenotes_{order_key}", type="secondary", disabled=current_stage != "Design"):
-            update_data = {
-                "design_notes": designer_note
-            }
-            if is_admin:
-                 update_data["admin_instructions"] = admin_note
-                 
-            update(f"orders/{order_key}", update_data)
-            st.toast("Notes updated!")
-            st.rerun()
-
-    st.markdown("---")
-
-    # ------------------------------------
-    # COMPLETE DESIGN
-    # ------------------------------------
-    if current_stage == "Design":
-        with st.container(border=True):
-            next_stage = selected_order.get("next_after_printing", "Assembly")
-            
-            # Ensure the final file is uploaded before allowing completion
-            is_ready = design_files.get("final") is not None
-            
-            if is_ready:
-                if st.button(
-                    f"🚀 Mark Design Completed → Move to **{next_stage}**", 
-                    key=f"complete_{order_key}", 
-                    type="primary", 
-                    use_container_width=True
-                ):
-                    update(f"orders/{order_key}", {
-                        "stage": next_stage,
-                        "design_completed_at": datetime.now().isoformat()
-                    })
-                    st.success(f"Design completed! Order **{selected_order['order_id']}** moved to **{next_stage}**")
-                    st.balloons()
-                    # After success, rerunning will deselect the order and move it to the 'Completed' list
+                # Save notes button
+                if st.button("💾 Save Notes", key=f"save_notes_{order_id}", use_container_width=True):
+                    update(f"orders/{key}", {"design_notes": designer_note})
+                    st.toast("Notes updated!")
                     st.rerun()
-            else:
-                st.warning("🚨 **Final Artwork File is required** before moving this order to the next stage. Please upload it in the section above.")
-    else:
-        st.success(f"Order already completed and moved to the **{current_stage}** stage on {selected_order.get('design_completed_at', 'N/A').split('T')[0]}.")
+                
+                st.markdown("---")
+                
+                # Completion Action
+                next_stage = order.get("next_after_printing", "Assembly")
+                is_ready = design_files.get("final") is not None
+                
+                if is_ready:
+                    if st.button(
+                        f"🚀 Move to {next_stage}", 
+                        key=f"done_{order_id}", 
+                        type="primary", 
+                        use_container_width=True
+                    ):
+                        update(f"orders/{key}", {
+                            "stage": next_stage,
+                            "design_completed_at": datetime.now().isoformat()
+                        })
+                        st.balloons()
+                        st.toast(f"Order moved to {next_stage}!")
+                        st.rerun()
+                else:
+                    st.warning("Final Art is required to complete this order.")
+                
+            st.markdown("---")
+
+# ----------------------------------------------------
+# TAB 2: COMPLETED DESIGNS
+# ----------------------------------------------------
+with tab_completed:
+    st.header(f"Design History ({len(completed_orders)})")
+    
+    if not completed_orders:
+        st.info("No designs have been completed yet.")
+        
+    sorted_completed = sorted(
+        completed_orders.items(),
+        key=lambda item: item[1].get("design_completed_at", "0000-01-01"),
+        reverse=True
+    )
+    
+    # Display completed orders in a simplified table/list
+    for key, order in sorted_completed:
+        col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 2, 2, 2, 1])
+        
+        completion_time = order.get("design_completed_at", "N/A")
+        total_time = calculate_time_diff(order.get("design_start_time"), order.get("design_end_time"))
+        
+        with col_c1: st.info(order.get("order_id"))
+        with col_c2: st.markdown(f"**{order.get('customer')}**")
+        with col_c3: st.markdown(f"*{order.get('item', '-')[:30]}...*")
+        with col_c4: st.success(f"Completed: {completion_time.split('T')[0]}")
+        with col_c5: st.caption(total_time)
+        
+        st.divider()
