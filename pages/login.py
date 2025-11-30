@@ -2,6 +2,21 @@ import streamlit as st
 
 st.set_page_config(page_title="OMS Login", layout="centered")
 
+# ---------------------------
+# HIDE SIDEBAR ON LOGIN PAGE
+# ---------------------------
+hide_sidebar_style = """
+    <style>
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+        [data-testid="collapsedControl"] {
+            display: none !important;
+        }
+    </style>
+"""
+st.markdown(hide_sidebar_style, unsafe_allow_html=True)
+
 st.title("🔐 Login to OMS")
 
 # ---------------------------
@@ -24,7 +39,6 @@ username = st.text_input("Username")
 password = st.text_input("Password", type="password")
 
 if st.button("Login"):
-
     if username in USERS and USERS[username]["password"] == password:
         st.session_state["username"] = username
         st.session_state["role"] = USERS[username]["role"]
