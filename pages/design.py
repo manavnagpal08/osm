@@ -34,6 +34,7 @@ for key, o in orders.items():
 
     if o.get("stage") == "Design":
         pending_orders[key] = o
+    # A design is considered 'completed' if it has a completion timestamp AND is not still pending
     elif o.get("design_completed_at"):
         completed_orders[key] = o
 
@@ -87,7 +88,7 @@ tab_pending, tab_completed = st.tabs([
 ])
 
 # ----------------------------------------------------
-# TAB 1: PENDING WORKLOAD
+# TAB 1: PENDING WORKLOAD (UNCHANGED)
 # ----------------------------------------------------
 with tab_pending:
     st.header(f"Orders Awaiting Design ({len(pending_orders)})")
@@ -174,7 +175,6 @@ with tab_pending:
                             encoded = encode_file(uploaded_file)
                             if encoded:
                                 update_path = f"orders/{key}"
-                                # Need to merge the design_files object since firebase update might overwrite the whole path
                                 current_files = orders.get(key, {}).get("design_files", {})
                                 current_files[file_key] = encoded
                                 update(update_path, {"design_files": current_files})
@@ -240,7 +240,7 @@ with tab_pending:
             st.markdown("---")
 
 # ----------------------------------------------------
-# TAB 2: COMPLETED DESIGNS
+# TAB 2: COMPLETED DESIGNS (ENHANCED)
 # ----------------------------------------------------
 with tab_completed:
     st.header(f"Design History ({len(completed_orders)})")
@@ -254,17 +254,78 @@ with tab_completed:
         reverse=True
     )
     
-    # Display completed orders in a simplified table/list
+    # Display completed orders using containers for detailed viewing
     for key, order in sorted_completed:
-        col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 2, 2, 2, 1])
+        order_id = order.get("order_id", "Unknown")
         
-        completion_time = order.get("design_completed_at", "N/A")
-        total_time = calculate_time_diff(order.get("design_start_time"), order.get("design_end_time"))
-        
-        with col_c1: st.info(order.get("order_id"))
-        with col_c2: st.markdown(f"**{order.get('customer')}**")
-        with col_c3: st.markdown(f"*{order.get('item', '-')[:30]}...*")
-        with col_c4: st.success(f"Completed: {completion_time.split('T')[0]}")
-        with col_c5: st.caption(total_time)
-        
-        st.divider()
+        with st.container(border=True):
+            
+            # --- CARD HEADER: ID, Customer, Item ---
+            st.markdown(f"## ✅ **{order_id}** — {order.get('customer')}")
+            st.markdown(f"**Item:** *{order.get('item', 'No description')}*")
+
+            # --- METRICS & SPECS ---
+            col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
+            
+            completion_time = order.get("design_completed_at", "N/A")
+            
+            col_c1.metric("Priority", order.get('priority', 'Medium'))
+            col_c2.metric("Product", order.get('product_type', 'N/A'))
+            col_c3.metric("Qty", order.get('qty', 'N/A'))
+            col_c4.metric("Completed On", completion_time.split('T')[0] if completion_time != 'N/A' else 'N/A')
+            col_c5.metric("Time Taken", calculate_time_diff(order.get("design_start_time"), order.get("design_end_time")).replace("Total: ", ""))
+            
+            st.divider()
+
+            # --- ADDED: FILES, NOTES, and PREVIOUS ORDER DATA ---
+            col_files_comp, col_notes_comp = st.columns([4, 3])
+            
+            design_files = order.get("design_files", {})
+            
+            # 1. FILES (PREVIEW + DOWNLOAD)
+            with col_files_comp:
+                st.subheader("📁 Final Files (For Reference/Reprint)")
+                
+                file_keys = [("reference", "Ref"), ("template", "Template"), ("final", "Final")]
+                
+                # Dynamic columns based on file availability
+                file_cols = st.columns(len(file_keys))
+                
+                for i, (file_key, label) in enumerate(file_keys):
+                    file_data = design_files.get(file_key)
+                    
+                    with file_cols[i]:
+                        st.markdown(f"**{label}**")
+                        if file_data:
+                            st.success("File Exists ✔")
+                            # Download button for completed tab
+                            download_button_ui(
+                                file_data, 
+                                f"{order_id}_{file_key}_FINAL.file", 
+                                f"⬇️ Download {label}", 
+                                f"comp_dl_{file_key}_{order_id}"
+                            )
+                        else:
+                            st.warning("File Missing ❗")
+
+            # 2. NOTES (DESIGNER + ADMIN)
+            with col_notes_comp:
+                st.subheader("📝 Design Notes")
+                
+                st.text_area(
+                    "Designer Notes",
+                    value=order.get("design_notes", "No notes recorded."),
+                    height=100,
+                    disabled=True,
+                    key=f"comp_notes_{order_id}"
+                )
+                
+                st.text_area(
+                    "Admin Instructions",
+                    value=order.get("admin_instructions", "No instructions recorded."),
+                    height=100,
+                    disabled=True,
+                    key=f"comp_admin_{order_id}"
+                )
+            
+            st.markdown("---")
