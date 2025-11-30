@@ -78,7 +78,7 @@ for key, order in diecut_orders.items():
                     "diecut_started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 st.success("Die-Cut started!")
-                st.experimental_rerun()
+                st.rerun()
 
         with col2:
             if st.button(f"Complete & Move to Assembly ({order['order_id']})", key=f"donedie_{key}"):
@@ -92,5 +92,5 @@ for key, order in diecut_orders.items():
                 })
 
                 st.success(f"Order {order['order_id']} moved to Assembly!")
-                st.experimental_rerun()
+                st.rerun()
 
