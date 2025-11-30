@@ -3,14 +3,11 @@ from firebase import read, push
 from utils import generate_order_id
 from datetime import date
 
-# --- CONFIGURATION & PAGE SETUP ---
+# --- CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_icon="📦")
 
-# ------------------------------------------
-# ROLE CHECK (Keep this section first for security)
-# ------------------------------------------
+# ------------- ROLE CHECK -------------
 if "role" not in st.session_state:
-    # st.switch_page("pages/login.py")
     st.session_state["role"] = "design"
 
 if st.session_state["role"] not in ["admin", "design"]:
@@ -20,9 +17,7 @@ if st.session_state["role"] not in ["admin", "design"]:
 st.title("📦 Create New Manufacturing Order")
 st.caption("Effortlessly log new and repeat orders with smart auto-fill capability.")
 
-# ------------------------------------------
-# LOAD EXISTING ORDERS
-# ------------------------------------------
+# ------------- LOAD ORDERS -------------
 all_orders = read("orders") or {}
 
 customer_list = sorted(list(set(
@@ -33,14 +28,12 @@ if "previous_order" not in st.session_state:
     st.session_state["previous_order"] = None
 
 
-# ============================================================
-# MAIN VISUAL CONTAINER
-# ============================================================
+# =====================================================
+# STEP 1 — ORDER TYPE & CUSTOMER
+# =====================================================
 main_container = st.container(border=True)
 
 with main_container:
-
-    # 1️⃣ ORDER TYPE & CUSTOMER
     st.subheader("1️⃣ Order Type & Customer Selection")
     st.divider()
 
@@ -65,103 +58,90 @@ with main_container:
             customer_email = st.text_input("Customer Email Address")
 
         else:
-            selected = st.selectbox("Select Customer (Required)", ["Select"] + customer_list)
+            selected = st.selectbox("Select Customer", ["Select"] + customer_list)
 
             if selected != "Select":
                 customer = selected
 
-                # Fetch last order for this customer
-                customer_orders = {
+                cust_orders = {
                     k: o for k, o in all_orders.items()
                     if isinstance(o, dict) and o.get("customer") == customer
                 }
 
-                if customer_orders:
+                if cust_orders:
                     latest = sorted(
-                        customer_orders.values(),
-                        key=lambda x: x.get("received", "0000-00-00"),
+                        cust_orders.values(),
+                        key=lambda o: o.get("received", "0000-00-00"),
                         reverse=True
                     )[0]
 
                     customer_phone = latest.get("customer_phone", "")
                     customer_email = latest.get("customer_email", "")
 
-                st.text_input("Customer Phone Number", value=customer_phone, key="cphone")
-                st.text_input("Customer Email Address", value=customer_email, key="cemail")
+                st.text_input("Customer Phone Number", value=customer_phone, key="ph")
+                st.text_input("Customer Email Address", value=customer_email, key="em")
 
 
-    # ============================================================
-    # 2️⃣ REPEAT ORDER → PREVIOUS ORDER PICKER
-    # ============================================================
-    previous_order = None
+# =====================================================
+# STEP 2 — PREVIOUS ORDER (Repeat Only)
+# =====================================================
+previous_order = None
 
-    if order_type_simple == "Repeat" and customer:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.info(f"Fetching previous orders for **{customer}**...")
-
-        customer_orders = {
-            k: o for k, o in all_orders.items()
-            if isinstance(o, dict) and o.get("customer") == customer
-        }
-
-        if customer_orders:
-            st.subheader("2️⃣ Select a Previous Order to Auto-Fill")
-
-            sorted_orders = sorted(
-                customer_orders.values(),
-                key=lambda o: o.get("received", "0000-00-00"),
-                reverse=True
-            )
-
-            options = [
-                f"{o['order_id']} — {o['item']} (Rec: {o['received']})"
-                for o in sorted_orders
-            ]
-
-            selected_display = st.selectbox(
-                "Select previous order to load details",
-                ["--- Select Order ---"] + options
-            )
-
-            if selected_display != "--- Select Order ---":
-                selected_id = selected_display.split("—")[0].strip()
-
-                for o in sorted_orders:
-                    if o["order_id"] == selected_id:
-                        previous_order = o
-                        st.success("✨ Auto-fill applied from selected order!")
-                        break
-        else:
-            st.warning("No previous order found. Proceed as new order.")
-
-    st.session_state["previous_order"] = previous_order
-
+if order_type_simple == "Repeat" and customer:
     st.markdown("<br>", unsafe_allow_html=True)
 
+    cust_orders = {
+        k: o for k, o in all_orders.items()
+        if isinstance(o, dict) and o.get("customer") == customer
+    }
 
-# ============================================================
-# 3️⃣ MAIN FORM
-# ============================================================
+    if cust_orders:
+        st.subheader("2️⃣ Select Previous Order to Auto-Fill")
 
+        sorted_orders = sorted(
+            cust_orders.values(),
+            key=lambda o: o.get("received", "0000-00-00"),
+            reverse=True
+        )
+
+        options = [
+            f"{o['order_id']} — {o['item']} (Rec: {o['received']})"
+            for o in sorted_orders
+        ]
+
+        selected_display = st.selectbox(
+            "Pick Order",
+            ["--- Select ---"] + options
+        )
+
+        if selected_display != "--- Select ---":
+            selected_id = selected_display.split("—")[0].strip()
+            for o in sorted_orders:
+                if o["order_id"] == selected_id:
+                    previous_order = o
+                    st.success("✨ Auto-fill applied!")
+                    break
+
+st.session_state["previous_order"] = previous_order
+
+
+# =====================================================
+# STEP 3 — MAIN FORM
+# =====================================================
 with st.form("order_form", clear_on_submit=True):
 
     st.header("3️⃣ Order Specification Form")
-    st.caption("Auto-fills when repeat order is selected.")
     st.divider()
 
     order_id = generate_order_id()
-    st.text_input("Order ID (Auto Generated)", order_id, disabled=True)
+    st.text_input("Order ID", order_id, disabled=True)
 
-    prev = st.session_state.get("previous_order", {})
+    prev = st.session_state.get("previous_order") or {}  # FIXED
 
     tab1, tab2 = st.tabs(["📋 General & Timeline", "📐 Specification IDs & Rate"])
 
-    # ---------------------------------------------------------
-    # TAB 1 — GENERAL DETAILS
-    # ---------------------------------------------------------
+    # ---------------- TAB 1 ----------------
     with tab1:
-        st.subheader("Core Product Details")
-
         colA, colB, colC = st.columns(3)
 
         with colA:
@@ -188,42 +168,32 @@ with st.form("order_form", clear_on_submit=True):
             )
 
         item = st.text_area(
-            "Product Description (Required)",
+            "Product Description",
             value=prev.get("item", ""),
             height=100
         )
 
-        st.markdown("---")
-        st.subheader("Timeline & Payment")
-
-        default_due_date = date.today()
-        if prev.get("due"):
-            try:
-                default_due_date = date.fromisoformat(prev["due"])
-            except:
-                pass
-
         colD, colE = st.columns(2)
-
         with colD:
             receive_date = st.date_input("Received Date", value=date.today())
-
         with colE:
-            due_date = st.date_input("Due Date", value=default_due_date)
+            default_due = date.today()
+            if prev.get("due"):
+                try:
+                    default_due = date.fromisoformat(prev["due"])
+                except:
+                    pass
+            due_date = st.date_input("Due Date", value=default_due)
 
         advance = st.radio(
-            "Advance Payment?",
+            "Advance Received?",
             ["Yes", "No"],
             index=0 if prev.get("advance") == "Yes" else 1,
             horizontal=True
         )
 
-    # ---------------------------------------------------------
-    # TAB 2 — SPECIFICATION IDs
-    # ---------------------------------------------------------
+    # ---------------- TAB 2 ----------------
     with tab2:
-        st.subheader("Specification IDs")
-
         colF, colG = st.columns(2)
 
         with colF:
@@ -243,57 +213,46 @@ with st.form("order_form", clear_on_submit=True):
             )
 
         total_value = float(qty) * float(rate)
-        st.metric("💰 Estimated Order Value", f"₹{total_value:,.2f}")
+        st.metric("💰 Total Value", f"₹{total_value:,.2f}")
 
-    # ---------------------------------------------------------
-    # SUBMIT BUTTON
-    # ---------------------------------------------------------
+
+    # ------------- SUBMIT BUTTON (FIXED) -------------
     submitted = st.form_submit_button("🚀 Create Order", type="primary")
 
     if submitted:
         if not customer:
-            st.error("❌ Customer name required.")
+            st.error("Customer name missing.")
         elif not item.strip():
-            st.error("❌ Product description required.")
+            st.error("Product description required.")
         elif receive_date > due_date:
-            st.error("❌ Due date cannot be earlier than received date.")
+            st.error("Invalid dates.")
         else:
 
             next_stage = "DieCut" if product_type == "Box" else "Assembly"
 
-            # Final Data
             data = {
                 "order_id": order_id,
                 "customer": customer,
-
                 "customer_phone": customer_phone,
                 "customer_email": customer_email,
-
                 "type": order_type_simple,
                 "product_type": product_type,
                 "priority": priority,
-
                 "item": item.strip(),
                 "qty": int(qty),
                 "received": str(receive_date),
                 "due": str(due_date),
                 "advance": advance,
-
                 "foil_id": foil.strip(),
                 "spotuv_id": spotuv.strip(),
                 "brand_thickness_id": brand_thickness.strip(),
                 "paper_thickness_id": paper_thickness.strip(),
                 "size_id": size.strip(),
                 "rate": float(rate),
-
                 "stage": "Design",
                 "next_after_printing": next_stage
             }
 
             push("orders", data)
-
-            st.success(f"🎉 Order **{order_id}** created successfully!")
-            st.info(f"Customer: {customer} | Phone: {customer_phone} | Email: {customer_email}")
+            st.success(f"🎉 Order {order_id} created successfully!")
             st.balloons()
-
-            st.session_state["previous_order"] = None
