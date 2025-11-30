@@ -16,8 +16,8 @@ if st.session_state["role"] != "admin":
     st.error("❌ Only admin can view this page.")
     st.stop()
 
-st.title("📋 All Orders Overview Dashboard (Advanced)")
-st.write("View and manage all orders in the system with advanced metrics, analysis, and filtering.")
+st.title("📋 All Orders Overview Dashboard (Advanced Production Analytics)")
+st.write("View and manage all orders in the system with advanced metrics, stage time analysis, and filtering.")
 
 # -------------------------------------
 # UTILITY FUNCTIONS
@@ -55,6 +55,19 @@ def get_completion_info(stage: str) -> Tuple[float, str]:
     except ValueError:
         return 0.05, "gray" # Show a sliver for un-categorized/new
 
+def get_stage_seconds(order, start_key, end_key):
+    """Safely calculates duration in seconds between two timestamps."""
+    start = order.get(start_key)
+    end = order.get(end_key)
+    if start and end:
+        try:
+            t1 = datetime.fromisoformat(start)
+            t2 = datetime.fromisoformat(end)
+            return (t2 - t1).total_seconds()
+        except:
+            return None
+    return None
+
 # -------------------------------------
 # FETCH ORDERS
 # -------------------------------------
@@ -75,9 +88,12 @@ in_progress_orders = total_orders - total_completed
 
 st.subheader("Key Performance Indicators")
 
-# New KPI Calculations: Cycle Time & On-Time Rate
+# New KPI Calculations: Cycle Time, On-Time Rate & Average Stage Times
 total_cycle_time_seconds = 0
 on_time_count = 0
+stage_time_totals = {"Design": 0.0, "Printing": 0.0, "DieCut": 0.0, "Assembly": 0.0, "Packing": 0.0}
+stage_time_counts = {"Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, "Packing": 0}
+
 
 if total_completed > 0:
     for order in completed_orders_data:
@@ -86,32 +102,57 @@ if total_completed > 0:
         completed_str = order.get('dispatched_at') or order.get('packing_completed_at') 
         due_str = order.get('due')
 
+        # 1. Total Cycle Time & On-Time Check
         if received_str and completed_str:
             try:
                 received_dt = datetime.fromisoformat(received_str)
                 completed_dt = datetime.fromisoformat(completed_str)
                 total_cycle_time_seconds += (completed_dt - received_dt).total_seconds()
+                
+                if due_str:
+                    due_dt = datetime.fromisoformat(due_str)
+                    if completed_dt <= due_dt:
+                        on_time_count += 1
             except:
                 pass 
         
-        if completed_str and due_str:
-            try:
-                completed_dt = datetime.fromisoformat(completed_dt)
-                due_dt = datetime.fromisoformat(due_str)
-                if completed_dt <= due_dt:
-                    on_time_count += 1
-            except:
-                pass 
+        # 2. Individual Stage Times
+        stages_map = [
+            ('Design', 'started_at', 'design_completed_at'),
+            ('Printing', 'printing_started_at', 'printing_completed_at'),
+            ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
+            ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
+            ('Packing', 'packing_start', 'packing_completed_at'),
+        ]
+        
+        for stage, start_key, end_key in stages_map:
+            s = get_stage_seconds(order, start_key, end_key)
+            if s is not None:
+                stage_time_totals[stage] += s
+                stage_time_counts[stage] += 1
+                
 
     avg_cycle_time_seconds = total_cycle_time_seconds / total_completed
     avg_cycle_time = str(timedelta(seconds=avg_cycle_time_seconds)).split('.')[0]
     on_time_rate = f"{(on_time_count / total_completed) * 100:.1f}%"
+    
+    # Calculate Average Stage Times (H:M:S string)
+    avg_stage_times = {}
+    for stage, total_s in stage_time_totals.items():
+        count = stage_time_counts[stage]
+        if count > 0:
+            avg_s = total_s / count
+            avg_stage_times[stage] = str(timedelta(seconds=avg_s)).split('.')[0]
+        else:
+            avg_stage_times[stage] = "N/A"
+            
 else:
     avg_cycle_time = "N/A"
     on_time_rate = "N/A"
+    avg_stage_times = {}
 
+# Display Core KPIs
 col1, col2, col3, col4, col5 = st.columns(5)
-
 col1.metric("Total Orders", total_orders, "Total in System")
 col2.metric("Orders In Progress", in_progress_orders, "Currently Active")
 col3.metric("Orders Completed", total_completed, "Finalized")
@@ -120,7 +161,7 @@ col5.metric("On-Time Delivery Rate", on_time_rate, f"{on_time_count} of {total_c
 
 st.divider()
 
-# Visualization
+# Visualization 1: Order Distribution
 stage_counts: Dict[str, int] = {
     "Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, 
     "Packing": 0, "Dispatch": 0, "Completed": 0
@@ -130,15 +171,41 @@ for o in orders.values():
     if stage in stage_counts:
         stage_counts[stage] += 1
 
-st.subheader("Order Distribution by Stage")
-# Convert to DataFrame for better chart labels
-chart_data = pd.DataFrame(
-    list(stage_counts.items()),
-    columns=['Stage', 'Count']
-)
-chart_data = chart_data.set_index('Stage')
+col_viz1, col_viz2 = st.columns(2)
 
-st.bar_chart(chart_data)
+with col_viz1:
+    st.subheader("Order Count Distribution")
+    chart_data = pd.DataFrame(
+        list(stage_counts.items()),
+        columns=['Stage', 'Count']
+    )
+    chart_data = chart_data.set_index('Stage')
+    st.bar_chart(chart_data)
+
+# Visualization 2: Average Stage Time
+with col_viz2:
+    if total_completed > 0 and any(stage_time_counts.values()):
+        avg_time_chart_data = {
+            'Stage': [],
+            'Avg_Seconds': []
+        }
+        for stage, total_s in stage_time_totals.items():
+            count = stage_time_counts[stage]
+            if count > 0:
+                avg_time_chart_data['Stage'].append(stage)
+                avg_time_chart_data['Avg_Seconds'].append(total_s / count)
+
+        avg_df = pd.DataFrame(avg_time_chart_data).set_index('Stage')
+        # Convert seconds to minutes for better visualization scale
+        avg_df['Avg Time (Min)'] = avg_df['Avg_Seconds'] / 60 
+        
+        st.subheader("Avg. Time Spent Per Stage (Completed Orders)")
+        st.bar_chart(avg_df['Avg Time (Min)'])
+        with st.expander("Average Stage Time Breakdown (H:M:S)"):
+            st.json(avg_stage_times)
+    else:
+        st.info("Insufficient data for Average Stage Time analysis.")
+
 
 st.divider()
 
@@ -146,6 +213,8 @@ st.divider()
 # FILTERS PANEL (Moved to Main Screen)
 # -------------------------------------
 with st.expander("🔍 Filter & Search Orders", expanded=False):
+    
+    st.markdown("##### Filter by Stage, Product, and Priority")
     col_s1, col_s2, col_s3 = st.columns(3)
     
     stage_filter = col_s1.selectbox(
@@ -163,9 +232,20 @@ with st.expander("🔍 Filter & Search Orders", expanded=False):
         ["All", "High", "Medium", "Low"]
     )
 
-    col_s4, col_s5 = st.columns(2)
-    customer_filter = col_s4.text_input("Customer Name Search")
-    order_search = col_s5.text_input("Search Order ID")
+    st.markdown("---")
+    
+    st.markdown("##### Filter by Date Range and Text Search")
+    
+    # Date Filters (default 30 days)
+    col_d1, col_d2, _ = st.columns([1, 1, 1])
+    start_date_filter = col_d1.date_input("Start Date (Received)", value=datetime.today().date() - timedelta(days=30), key="start_date")
+    end_date_filter = col_d2.date_input("End Date (Received)", value=datetime.today().date(), key="end_date")
+
+    # Text Filters
+    col_t1, col_t2, _ = st.columns([1, 1, 1])
+    customer_filter = col_t1.text_input("Customer Name Search")
+    order_search = col_t2.text_input("Search Order ID")
+
 
 st.caption("Expand the filter box above to refine your search.")
 
@@ -174,6 +254,9 @@ st.caption("Expand the filter box above to refine your search.")
 # -------------------------------------
 
 filtered: Dict[str, Any] = {}
+# Prepare datetime objects for range comparison (start of day / end of day)
+start_dt = datetime.combine(start_date_filter, datetime.min.time())
+end_dt = datetime.combine(end_date_filter, datetime.max.time())
 
 for key, o in orders.items():
 
@@ -191,6 +274,17 @@ for key, o in orders.items():
     # PRIORITY FILTER
     if priority_filter != "All" and o.get("priority") != priority_filter:
         continue
+        
+    # DATE FILTER (uses 'received' timestamp)
+    received_str = o.get("received")
+    if received_str:
+        try:
+            received_dt = datetime.fromisoformat(received_str)
+            if received_dt < start_dt or received_dt > end_dt:
+                continue
+        except:
+            # Skip if date is malformed
+            continue 
 
     # CUSTOMER FILTER
     if customer_filter and customer_filter.lower() not in o.get("customer", "").lower():
@@ -205,20 +299,58 @@ for key, o in orders.items():
 # -------------------------------------
 # DISPLAY RESULTS
 # -------------------------------------
-st.subheader(f"Filtered Orders: {len(filtered)}")
+st.subheader(f"Filtered Orders: {len(filtered)} found.")
 
 if not filtered:
     st.info("No orders match the selected filters.")
     st.stop()
 
 # Sort by received date for better overview
-sorted_filtered: list[Tuple[str, Any]] = sorted(
+sorted_filtered_list: list[Tuple[str, Any]] = sorted(
     filtered.items(),
     key=lambda x: x[1].get("received", "2099-12-31"),
     reverse=True # Show newest first
 )
 
-for key, order in sorted_filtered:
+# --- Summary Table (New Feature) ---
+summary_data = []
+for key, order in sorted_filtered_list:
+    stage = order.get('stage', 'N/A')
+    
+    total_order_cycle = ""
+    if stage == 'Completed':
+         total_order_cycle = calculate_stage_duration(order.get('received'), order.get('dispatched_at') or order.get('packing_completed_at'))
+
+    summary_data.append({
+        "Order ID": order.get('order_id', key),
+        "Customer": order.get('customer', 'N/A'),
+        "Stage": stage,
+        "Priority": order.get('priority', 'N/A'),
+        "Product Type": order.get('product_type', 'N/A'),
+        "Quantity": order.get('qty', 'N/A'),
+        "Received": order.get('received', 'N/A').split('T')[0],
+        "Due Date": order.get('due', 'N/A').split('T')[0],
+        "Total Cycle Time": total_order_cycle if stage == 'Completed' else 'In Progress',
+    })
+
+summary_df = pd.DataFrame(summary_data)
+st.markdown("#### High-Level Order Summary")
+st.dataframe(
+    summary_df, 
+    use_container_width=True, 
+    hide_index=True,
+    column_config={
+        "Total Cycle Time": st.column_config.TextColumn(
+            "Total Cycle Time",
+            help="Time from order received to final completion/dispatch."
+        )
+    }
+)
+
+st.divider()
+st.subheader("Individual Order Details")
+
+for key, order in sorted_filtered_list:
     
     stage = order.get('stage', 'N/A')
     progress, _ = get_completion_info(stage)
