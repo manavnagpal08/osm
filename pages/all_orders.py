@@ -1,201 +1,201 @@
 import streamlit as st
-from firebase import read
-from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple
+from firebase import read, update
+import base64
+from datetime import datetime
 
-st.set_page_config(page_title="Admin Order Overview", page_icon="📋", layout="wide")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(page_title="All Orders", page_icon="📑", layout="wide")
 
-# -------------------------------------
-# ROLE CHECK
-# -------------------------------------
+# --------------- PERMISSION CHECK --------------
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
-if st.session_state["role"] != "admin":
-    st.error("❌ Only admin can view this page.")
+if st.session_state["role"] not in ["admin", "design", "printing", "lamination", "diecut", "assembly", "packing", "dispatch"]:
+    st.error("❌ You do not have permission to view this page.")
     st.stop()
 
-st.title("📋 All Orders Overview")
-st.write("View and manage all orders in the system with advanced metrics.")
+st.title("📑 All Orders Overview")
+st.caption("Search, filter, and view every order across all departments.")
 
-# -------------------------------------
-# UTILITY FUNCTIONS
-# -------------------------------------
+# ---------------- LOAD DATA ----------------
+orders = read("orders") or {}
 
-def calculate_stage_duration(start_time: str, end_time: str) -> str:
-    """Calculates the duration between two ISO format timestamps and returns H:M:S."""
-    if start_time and end_time:
-        try:
-            t1 = datetime.fromisoformat(start_time)
-            t2 = datetime.fromisoformat(end_time)
-            diff = t2 - t1
-            total_seconds = int(diff.total_seconds())
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            return f"**{hours:02}h {minutes:02}m {seconds:02}s**"
-        except:
-            return "N/A (Time Error)"
-    return "In Progress"
-
-# -------------------------------------
-# FETCH ORDERS
-# -------------------------------------
-orders: Dict[str, Any] = read("orders") or {}
-
-if not orders or not isinstance(orders, dict):
-    st.warning("No orders found.")
-    st.stop()
-
-# -------------------------------------
-# KPI METRICS
-# -------------------------------------
-
-total_orders = len(orders)
-completed_orders = sum(1 for o in orders.values() if o.get('stage') == 'Completed')
-in_progress_orders = total_orders - completed_orders
-
-st.subheader("Key Performance Indicators")
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Total Orders", total_orders, "Total in System")
-col2.metric("Orders In Progress", in_progress_orders, "Currently Active")
-col3.metric("Orders Completed", completed_orders, "Finalized")
-
-st.divider()
-
-# -------------------------------------
-# FILTERS PANEL
-# -------------------------------------
+# ------------- FILTER PANEL ----------------
 st.sidebar.header("🔍 Filters")
+
+search = st.sidebar.text_input("Search (ID / Customer / Item)")
 
 stage_filter = st.sidebar.selectbox(
     "Stage",
-    ["All", "Design", "Printing", "DieCut", "Assembly", "Packing", "Dispatch", "Completed"]
-)
-
-product_filter = st.sidebar.selectbox(
-    "Product Type",
-    ["All", "Bag", "Box"]
+    ["All", "Design", "Printing", "Lamination", "DieCut", "Assembly", "Packing", "Dispatch"],
+    index=0
 )
 
 priority_filter = st.sidebar.selectbox(
     "Priority",
-    ["All", "High", "Medium", "Low"]
+    ["All", "High", "Medium", "Low"],
+    index=0
 )
 
-customer_filter = st.sidebar.text_input("Customer Name Search")
+product_filter = st.sidebar.selectbox(
+    "Product Type",
+    ["All", "Bag", "Box"],
+    index=0
+)
 
-order_search = st.sidebar.text_input("Search Order ID")
+sort_by = st.sidebar.selectbox(
+    "Sort By",
+    ["Newest First", "Oldest First", "Priority"],
+    index=0
+)
 
-# -------------------------------------
-# APPLY FILTERS
-# -------------------------------------
+# ---------------- FILTER LOGIC ----------------
+def matches_search(o):
+    if not search:
+        return True
+    s = search.lower()
+    return (
+        s in o.get("order_id", "").lower() or
+        s in o.get("customer", "").lower() or
+        s in o.get("item", "").lower()
+    )
 
-filtered: Dict[str, Any] = {}
+filtered_orders = []
 
 for key, o in orders.items():
-
     if not isinstance(o, dict):
         continue
 
-    # STAGE FILTER
+    # Stage filter
     if stage_filter != "All" and o.get("stage") != stage_filter:
         continue
 
-    # PRODUCT TYPE FILTER
-    if product_filter != "All" and o.get("product_type") != product_filter:
-        continue
-
-    # PRIORITY FILTER
+    # Priority filter
     if priority_filter != "All" and o.get("priority") != priority_filter:
         continue
 
-    # CUSTOMER FILTER
-    if customer_filter and customer_filter.lower() not in o.get("customer", "").lower():
+    # Product type filter
+    if product_filter != "All" and o.get("product_type") != product_filter:
         continue
 
-    # ORDER ID FILTER
-    if order_search and order_search.lower() not in o.get("order_id", "").lower():
+    # Search filter
+    if not matches_search(o):
         continue
 
-    filtered[key] = o
+    filtered_orders.append((key, o))
 
-# -------------------------------------
-# DISPLAY RESULTS
-# -------------------------------------
-st.subheader(f"Filtered Orders: {len(filtered)}")
+# -------- SORTING --------
+if sort_by == "Newest First":
+    filtered_orders.sort(key=lambda x: x[1].get("received", ""), reverse=True)
+elif sort_by == "Oldest First":
+    filtered_orders.sort(key=lambda x: x[1].get("received", ""))
+elif sort_by == "Priority":
+    priority_rank = {"High": 0, "Medium": 1, "Low": 2}
+    filtered_orders.sort(key=lambda x: priority_rank.get(x[1].get("priority", "Medium"), 1))
 
-if not filtered:
-    st.info("No orders match the selected filters.")
+# ------------------- FILE PREVIEW FUNCTION -------------------
+def preview_file(b64data):
+    if not b64data:
+        st.warning("No file uploaded.")
+        return
+
+    raw = base64.b64decode(b64data)
+    head = raw[:10]
+
+    if head.startswith(b"%PDF"):
+        st.info("PDF file — download to view.")
+    elif head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff":
+        st.image(raw, use_container_width=True)
+    else:
+        st.info("Unknown file format.")
+
+# ---------------- DISPLAY RESULTS ----------------
+st.subheader(f"📦 Showing {len(filtered_orders)} orders")
+
+if not filtered_orders:
+    st.warning("No orders match your filters.")
     st.stop()
 
-# Sort by received date for better overview
-sorted_filtered: list[Tuple[str, Any]] = sorted(
-    filtered.items(),
-    key=lambda x: x[1].get("received", "2099-12-31"),
-    reverse=True # Show newest first
-)
+for key, o in filtered_orders:
+    with st.container(border=True):
 
-for key, order in sorted_filtered:
+        col1, col2, col3, col4 = st.columns([2,2,2,2])
 
-    with st.expander(f"**{order['order_id']}** — {order['customer']} | **Stage:** `{order.get('stage', 'N/A')}`"):
+        # Basic info
+        col1.markdown(f"### 🏷 Order **{o.get('order_id')}**")
+        col1.caption(f"Customer: **{o.get('customer')}**")
 
-        col_meta, col_dates = st.columns([1, 1])
+        col2.metric("Priority", o.get("priority", "—"))
+        col3.metric("Product Type", o.get("product_type", "—"))
+        col4.metric("Stage", o.get("stage", "—"))
 
-        with col_meta:
-            st.markdown("### Order Details")
-            st.write(f"**Product Type:** {order.get('product_type', 'N/A')}")
-            st.write(f"**Priority:** {order.get('priority', 'N/A')}")
-            st.write(f"**Item:** {order.get('item', 'N/A')}")
-            st.write(f"**Quantity:** {order.get('qty', 'N/A')}")
+        st.markdown("---")
 
-        with col_dates:
-            st.markdown("### Key Timelines")
-            st.write(f"**Order Received:** {order.get('received', 'N/A').split('T')[0]}")
-            st.write(f"**Due Date:** {order.get('due', 'N/A').split('T')[0]}")
-            st.write(f"**Current Stage:** `{order.get('stage', 'N/A')}`")
+        # Timeline
+        c1, c2, c3 = st.columns(3)
+        c1.write(f"📥 Received: **{o.get('received','')}**")
+        c2.write(f"📅 Due: **{o.get('due','')}**")
 
+        # STATUS COLOR
+        if o.get("stage") == "Dispatch":
+            c3.success("Completed & Dispatched")
+        else:
+            c3.info(f"Current Stage: **{o.get('stage')}**")
 
-        st.divider()
+        st.markdown("---")
 
-        st.markdown("### Specs")
-        st.write(f"Foil ID: {order.get('foil_id', 'N/A')}")
-        st.write(f"Spot UV ID: {order.get('spotuv_id', 'N/A')}")
-        st.write(f"Brand Thickness: {order.get('brand_thickness_id', 'N/A')}")
-        st.write(f"Paper Thickness: {order.get('paper_thickness_id', 'N/A')}")
-        st.write(f"Size: {order.get('size_id', 'N/A')}")
-        st.write(f"Rate: {order.get('rate', 'N/A')}")
+        # Full ORDER DETAILS DROP-DOWN
+        with st.expander("📋 View Full Order Details"):
+            st.json(o)
 
-        st.divider()
+        # ---------------- FILE CHECK IN EVERY STAGE ----------------
+        st.markdown("### 📁 Attached Files")
 
-        st.markdown("### Workflow Duration & Timestamps")
-        
-        # Calculate durations
-        design_duration = calculate_stage_duration(order.get('started_at'), order.get('design_completed_at'))
-        printing_duration = calculate_stage_duration(order.get('printing_started_at'), order.get('printing_completed_at'))
-        diecut_duration = calculate_stage_duration(order.get('diecut_started_at'), order.get('diecut_completed_at'))
-        assembly_duration = calculate_stage_duration(order.get('assembly_started_at'), order.get('assembly_completed_at'))
-        packing_duration = calculate_stage_duration(order.get('packing_start'), order.get('packing_completed_at'))
+        colA, colB, colC, colD = st.columns(4)
 
-        col_duration, col_timestamps = st.columns(2)
+        # Design Final File
+        if o.get("design_files",{}).get("final"):
+            with colA:
+                st.markdown("**Design Final Art**")
+                preview_file(o["design_files"]["final"])
+                st.download_button(
+                    "Download",
+                    base64.b64decode(o["design_files"]["final"]),
+                    file_name=f"{o['order_id']}_design_final.pdf"
+                )
 
-        with col_duration:
-            st.markdown("#### Stage Durations")
-            st.markdown(f"**Design:** {design_duration}")
-            st.markdown(f"**Printing:** {printing_duration}")
-            st.markdown(f"**DieCut:** {diecut_duration}")
-            st.markdown(f"**Assembly:** {assembly_duration}")
-            st.markdown(f"**Packing:** {packing_duration}")
+        # Printing Ready File
+        if o.get("print_ready_file"):
+            with colB:
+                st.markdown("**Print Ready File**")
+                preview_file(o["print_ready_file"])
+                st.download_button("Download", base64.b64decode(o["print_ready_file"]),
+                                   file_name=f"{o['order_id']}_print_ready.pdf")
 
-        with col_timestamps:
-            st.markdown("#### Key Timestamps")
-            st.json({
-                "next_after_printing": order.get("next_after_printing", "N/A"),
-                "design_completed": order.get("design_completed_at", "N/A"),
-                "printing_completed": order.get("printing_completed_at", "N/A"),
-                "diecut_completed": order.get("diecut_completed_at", "N/A"),
-                "assembly_completed": order.get("assembly_completed_at", "N/A"),
-                "packing_completed": order.get("packing_completed_at", "N/A"),
-                "dispatched_at": order.get("dispatched_at", "N/A"),
-            })
+        # Lamination Output
+        if o.get("lamination_file"):
+            with colC:
+                st.markdown("**Lamination File**")
+                preview_file(o["lamination_file"])
+                st.download_button("Download", base64.b64decode(o["lamination_file"]),
+                                   file_name=f"{o['order_id']}_lamination.pdf")
+
+        # Packing Output
+        if o.get("packing_file"):
+            with colD:
+                st.markdown("**Packing Output**")
+                preview_file(o["packing_file"])
+                st.download_button(
+                    "Download",
+                    base64.b64decode(o["packing_file"]),
+                    file_name=f"{o['order_id']}_packing_output.pdf"
+                )
+
+        st.markdown("---")
+
+        # ------- ADMIN ONLY DELETE BUTTON --------
+        if st.session_state["role"] == "admin":
+            if st.button(f"🗑 Delete Order {o['order_id']}", key=f"del_{o['order_id']}"):
+                update(f"orders/{key}", None)  # delete
+                st.success("Deleted Successfully!")
+                st.rerun()
