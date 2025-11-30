@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import base64
 import io
 import qrcode
+import json # Import json for dumps
 from typing import Optional, Any, Dict
 
 st.set_page_config(page_title="Packing Department", page_icon="📦", layout="wide")
@@ -206,8 +207,32 @@ with tab1:
         else:
             status_message = "Waiting for Assembly completion timestamp."
             status_type = st.info
+        
+        # Get current details for QR encoding
+        current_assign = st.session_state.get(f"assign_{order_id}", o.get("packing_assigned", ""))
+        current_material = st.session_state.get(f"material_{order_id}", o.get("packing_material", ""))
+        current_notes = st.session_state.get(f"notes_{order_id}", o.get("packing_notes", ""))
 
-        qr_b64 = generate_qr_base64(order_id)
+        # -------- QR CODE (JSON ENCODED) --------
+        qr_json_data = {
+            "order_id": o.get("order_id"),
+            "customer": o.get("customer"),
+            "item": o.get("item"),
+            "qty": o.get("qty"),
+            "priority": o.get("priority"),
+            "stage": "Packing",
+            "product_type": o.get("product_type"),
+            "assign_to": current_assign,
+            "material_used": current_material,
+            "notes": current_notes,
+            "next_stage": "Dispatch",
+            "timestamp": datetime.now().isoformat()
+        }
+
+        json_text = json.dumps(qr_json_data)
+        
+        # FIX: Generate QR code using the full JSON string
+        qr_b64 = generate_qr_base64(json_text) 
 
         with st.container(border=True):
 
@@ -267,11 +292,8 @@ with tab1:
 
                 # -------- SLIP --------
                 st.subheader("📄 Job Slip")
-                assign = o.get("packing_assigned", "")
-                material = o.get("packing_material", "")
-                notes = o.get("packing_notes", "")
-                
-                slip_pdf = generate_packing_slip(o, assign, material, notes)
+                # Using the temporary/saved values for the PDF slip
+                slip_pdf = generate_packing_slip(o, current_assign, current_material, current_notes)
 
                 st.download_button(
                     label="📥 Download Packing Slip (PDF)",
@@ -409,7 +431,15 @@ with tab2:
             
             with col_files:
                 st.markdown("#### Final Output File & QR")
-                qr_b64 = generate_qr_base64(o["order_id"])
+                qr_json_data = {
+                    "order_id": o.get("order_id"),
+                    "customer": o.get("customer"),
+                    "item": o.get("item"),
+                    "qty": o.get("qty"),
+                    "stage": "Completed/Dispatch",
+                    "completion_time": o.get('packing_completed_at', 'N/A')
+                }
+                qr_b64 = generate_qr_base64(json.dumps(qr_json_data))
                 
                 st.image(base64.b64decode(qr_b64), width=100)
                 st.caption("QR Code for identification.")
