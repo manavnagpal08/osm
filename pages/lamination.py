@@ -2,12 +2,18 @@ import streamlit as st
 from firebase import read, update
 import base64
 from datetime import datetime
+import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
 st.set_page_config(page_title="Lamination Department", layout="wide", page_icon="🟦")
 
-# -------------------
+# ---------------------------------------------------
 # ROLE CHECK
-# -------------------
+# ---------------------------------------------------
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
@@ -16,19 +22,21 @@ if st.session_state["role"] not in ["lamination", "admin"]:
     st.stop()
 
 st.title("🟦 Lamination Department")
-st.caption("Upload lamination output, enter lamination details, track time, and move orders to DieCut.")
+st.caption("Manage lamination process, upload output files, enter lamination details & generate job slips.")
 
-
-# -------------------
+# ---------------------------------------------------
 # LOAD ORDERS
-# -------------------
+# ---------------------------------------------------
 orders = read("orders") or {}
-pending, completed = {}, {}
+
+pending = {}
+completed = {}
 
 for key, o in orders.items():
     if not isinstance(o, dict):
         continue
 
+    # Only BOX orders go to Lamination
     if o.get("product_type") != "Box":
         continue
 
@@ -38,9 +46,9 @@ for key, o in orders.items():
         completed[key] = o
 
 
-# -------------------
-# FILE DOWNLOAD
-# -------------------
+# ---------------------------------------------------
+# FILE DOWNLOAD HANDLER
+# ---------------------------------------------------
 def download_button(label, b64_data, order_id, fname, key_prefix):
     if not b64_data:
         return
@@ -67,9 +75,9 @@ def download_button(label, b64_data, order_id, fname, key_prefix):
     )
 
 
-# -------------------
+# ---------------------------------------------------
 # FILE PREVIEW
-# -------------------
+# ---------------------------------------------------
 def preview(label, b64):
     if not b64:
         st.warning(f"{label} missing.")
@@ -86,43 +94,54 @@ def preview(label, b64):
         st.image(raw, use_column_width=True)
 
 
-# -------------------
-# PRINT HANDLER
-# -------------------
-def trigger_print(section_id):
-    js = f"""
-    <script>
-        var content = document.getElementById('{section_id}').innerHTML;
-        var win = window.open("", "", "width=900,height=650");
-        win.document.write('<html><head><title>Print</title></head><body>');
-        win.document.write(content);
-        win.document.write('</body></html>');
-        win.document.close();
-        win.print();
-    </script>
-    """
-    st.components.v1.html(js, height=0)
+# ---------------------------------------------------
+# GENERATE LAMINATION SLIP PDF
+# ---------------------------------------------------
+def generate_lamination_slip(o, lam_type, material, reel, assign_to, notes):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    t = c.beginText(40, 800)
+    t.setFont("Helvetica", 12)
+
+    t.textLine("LAMINATION DEPARTMENT – JOB SLIP")
+    t.textLine("-------------------------------------------")
+    t.textLine(f"Order ID: {o.get('order_id')}")
+    t.textLine(f"Customer: {o.get('customer')}")
+    t.textLine(f"Item: {o.get('item')}")
+    t.textLine("")
+    t.textLine(f"Lamination Type: {lam_type}")
+    t.textLine(f"Material: {material}")
+    t.textLine(f"Reel Width: {reel} inches")
+    t.textLine(f"Assigned To: {assign_to}")
+    t.textLine("")
+    t.textLine("NOTES:")
+    t.textLines(notes or "—")
+
+    c.drawText(t)
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
-# -------------------
-# TABS
-# -------------------
+# ---------------------------------------------------
+# TABS UI
+# ---------------------------------------------------
 tab1, tab2 = st.tabs([
     f"🛠 Pending Lamination ({len(pending)})",
     f"✔ Completed Lamination ({len(completed)})"
 ])
 
 
-# -------------------
-# TAB 1 – PENDING
-# -------------------
+# ---------------------------------------------------
+# TAB 1: PENDING LAMINATION
+# ---------------------------------------------------
 with tab1:
 
     if not pending:
         st.success("🎉 No pending lamination jobs!")
 
     for key, o in pending.items():
-
         order_id = o["order_id"]
         lam_file = o.get("lamination_file")
 
@@ -130,14 +149,13 @@ with tab1:
 
             st.subheader(f"🟦 Order {order_id}")
             st.markdown(f"**Customer:** {o.get('customer')} — **Item:** {o.get('item')}")
-
             st.divider()
 
             # ---------------- TIME TRACKING ----------------
+            st.subheader("⏱ Time Tracking")
+
             start = o.get("lamination_start")
             end = o.get("lamination_end")
-
-            st.subheader("⏱ Time Tracking")
 
             if not start:
                 if st.button("▶️ Start Lamination", key=f"start_{order_id}", use_container_width=True):
@@ -148,7 +166,7 @@ with tab1:
                 if st.button("⏹ End Lamination", key=f"end_{order_id}", use_container_width=True):
                     update(f"orders/{key}", {"lamination_end": datetime.now().isoformat()})
                     st.rerun()
-                st.info(f"Started at {start}")
+                st.info(f"Started at: {start}")
 
             else:
                 st.success("Lamination Completed")
@@ -157,14 +175,12 @@ with tab1:
 
             st.divider()
 
-
-            # ---------------- DETAILS ----------------
+            # ---------------- LAMINATION DETAILS ----------------
             st.subheader("📋 Lamination Details")
 
             lam_type = st.selectbox(
                 "Lamination Type",
                 ["Gloss", "Matt", "Velvet", "Thermal", "BOPP Gloss", "BOPP Matt"],
-                index=0,
                 key=f"type_{order_id}"
             )
 
@@ -209,12 +225,11 @@ with tab1:
 
             st.divider()
 
-
-            # ---------------- UPLOAD FILE ----------------
+            # ---------------- FILE UPLOAD ----------------
             st.subheader("📁 Lamination Output File")
 
             up = st.file_uploader(
-                "Upload file",
+                "Upload Lamination File",
                 type=["png", "jpg", "jpeg", "pdf"],
                 key=f"upl_{order_id}"
             )
@@ -222,34 +237,29 @@ with tab1:
             if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and up:
                 encoded = base64.b64encode(up.read()).decode()
                 update(f"orders/{key}", {"lamination_file": encoded})
-                st.success("File saved!")
+                st.success("File Uploaded!")
                 st.rerun()
 
             if lam_file:
                 preview("Lamination Output", lam_file)
-                download_button("⬇ Download", lam_file, order_id, "lamination", "dl_lam")
+                download_button("⬇ Download File", lam_file, order_id, "lamination", "dl_lam")
 
             st.divider()
 
+            # ---------------- PDF SLIP DOWNLOAD ----------------
+            st.subheader("📄 Download Lamination Slip")
 
-            # ---------------- PRINT REPORT ----------------
-            section_id = f"print_{order_id}"
+            slip_pdf = generate_lamination_slip(
+                o, lam_type, material, reel, assign_to, notes
+            )
 
-            st.markdown(f"""
-            <div id="{section_id}">
-                <h2>Lamination Report — {order_id}</h2>
-                <p><b>Customer:</b> {o.get('customer')}</p>
-                <p><b>Item:</b> {o.get('item')}</p>
-                <p><b>Lamination Type:</b> {lam_type}</p>
-                <p><b>Material:</b> {material}</p>
-                <p><b>Reel Width:</b> {reel} inches</p>
-                <p><b>Assigned To:</b> {assign_to}</p>
-                <p><b>Notes:</b> {notes}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            if st.button("🖨 Print", key=f"print_{order_id}", use_container_width=True):
-                trigger_print(section_id)
+            st.download_button(
+                label="📥 Download PDF Slip",
+                data=slip_pdf,
+                file_name=f"{order_id}_lamination_slip.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
             st.divider()
 
@@ -263,29 +273,27 @@ with tab1:
                     st.balloons()
                     st.rerun()
             else:
-                st.warning("Upload file & finish lamination first.")
+                st.warning("Finish lamination + upload file to continue.")
 
 
-# -------------------
-# TAB 2 — COMPLETED
-# -------------------
+# ---------------------------------------------------
+# TAB 2: COMPLETED LAMINATION
+# ---------------------------------------------------
 with tab2:
-
     if not completed:
         st.info("No completed lamination jobs yet.")
     else:
         for key, o in completed.items():
-
             order_id = o["order_id"]
 
             with st.container(border=True):
                 st.subheader(f"✔ {order_id} — {o.get('customer')}")
-                st.caption(f"Completed at {o.get('lamination_completed_at')}")
+                st.caption(f"Completed at: {o.get('lamination_completed_at')}")
 
                 lam_file = o.get("lamination_file")
 
                 if lam_file:
                     preview("Lamination Output", lam_file)
-                    download_button("⬇ Download", lam_file, order_id, "lamination", "dl_completed")
+                    download_button("⬇ Download File", lam_file, order_id, "lamination", "dl_completed")
 
                 st.divider()
