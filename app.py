@@ -1,16 +1,19 @@
 import streamlit as st
 
-st.set_page_config(page_title="OMS", layout="wide")
+st.set_page_config(page_title="OMS Dashboard", layout="wide")
 
-# 🛑 Block if not logged in
+# Block if not logged in
 if "role" not in st.session_state:
     st.switch_page("login.py")
 
 role = st.session_state["role"]
 
-st.title("📦 OMS Home")
+st.title("📦 Order Management System")
+st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{role}**")
 
-# ---- CUSTOM NAVIGATION ----
+# -------------------------------
+# CUSTOM ROLE-BASED NAVIGATION
+# -------------------------------
 pages = {}
 
 if role in ["admin", "design"]:
@@ -30,6 +33,4 @@ if role in ["admin", "dispatch"]:
     pages["Dispatch Dept"] = "secure_pages/dispatch.py"
 
 choice = st.sidebar.selectbox("Navigate", list(pages.keys()))
-
-st.session_state["nav"] = pages[choice]
-st.switch_page(st.session_state["nav"])
+st.switch_page(pages[choice])
