@@ -1,14 +1,11 @@
 import streamlit as st
 from firebase import read, update
-from datetime import datetime
+from datetime import datetime, timedelta
 import base64
 import io
-import json
 import qrcode
+from typing import Optional, Any, Dict
 
-# ---------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------
 st.set_page_config(page_title="Packing Department", page_icon="📦", layout="wide")
 
 # ---------------- ROLE CHECK ----------------
@@ -20,12 +17,12 @@ if st.session_state["role"] not in ["packing", "admin"]:
     st.stop()
 
 st.title("📦 Packing Department")
-st.caption("Handle packing, generate QR codes, assign work & move orders to Dispatch.")
+st.caption("Handle packing, generate QR codes, track time, assign work & move orders to Dispatch.")
 
 # ---------------- LOAD ORDERS ----------------
 orders = read("orders") or {}
-pending = {}
-completed = {}
+pending: Dict[str, Any] = {}
+completed: Dict[str, Any] = {}
 
 for key, o in orders.items():
     if not isinstance(o, dict):
@@ -36,7 +33,7 @@ for key, o in orders.items():
     elif o.get("packing_completed_at"):
         completed[key] = o
 
-# ---------- SORT PENDING BY PRIORITY ----------
+# --------- SORT BY PRIORITY ----------
 priority_rank = {"High": 0, "Medium": 1, "Low": 2}
 
 sorted_pending = sorted(
@@ -46,6 +43,51 @@ sorted_pending = sorted(
         x[1].get("received", "2099-12-31")
     )
 )
+
+# ---------- UTILITIES ----------
+
+def calculate_time_diff(start: Optional[str], end: Optional[str]) -> str:
+    """Calculate how long the task took."""
+    if start and end:
+        try:
+            t1 = datetime.fromisoformat(start)
+            t2 = datetime.fromisoformat(end)
+            diff = t2 - t1
+            return f"Total Time: **{str(diff).split('.')[0]}**"
+        except:
+            return "Time Calculation Error"
+    elif start:
+        return "⏳ Running…"
+    return "Not Started"
+
+def detect_file_type(data: Optional[str]):
+    """Detects file type from base64 data."""
+    if not data:
+        return None, None, None
+    raw = base64.b64decode(data)
+    header = raw[:10]
+    if header.startswith(b"%PDF"): return "pdf", "application/pdf", ".pdf"
+    if header.startswith(b"\x89PNG"): return "png", "image/png", ".png"
+    if header[:3] == b"\xff\xd8\xff": return "jpg", "image/jpeg", ".jpg"
+    return "bin", "application/octet-stream", ".bin"
+
+def download_button_ui(label: str, b64: Optional[str], order_id: str, fname: str):
+    """Standard download button wrapper."""
+    if not b64: 
+        return
+    
+    raw = base64.b64decode(b64)
+    _, mime, ext = detect_file_type(b64)
+
+    st.download_button(
+        label=label,
+        data=raw,
+        file_name=f"{order_id}_{fname}{ext}",
+        mime=mime or "application/octet-stream",
+        key=f"dl_{fname}_{order_id}",
+        use_container_width=True
+    )
+
 
 # ---------- QR CODE GENERATOR ----------
 def generate_qr_base64(data: str):
@@ -58,65 +100,73 @@ def generate_qr_base64(data: str):
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
+# ---------- PDF SLIP ----------
+def generate_packing_slip(o, assign, material, notes):
+    """Generates a simple PDF packing slip."""
+    
+    # We use a pure Python approach for simplicity, but the QR code image must be
+    # attached separately as the PDF generation here is text-only.
+    lines = [
+        "PACKING DEPARTMENT – JOB SLIP",
+        "===============================",
+        "",
+        f"Order ID : {o.get('order_id')}",
+        f"Customer : {o.get('customer')}",
+        f"Item     : {o.get('item')}",
+        f"Qty      : {o.get('qty'):,}",
+        "",
+        f"Assigned To  : {assign or 'N/A'}",
+        f"Material Used: {material or 'N/A'}",
+        "",
+        "Notes:",
+        notes or "No special notes.",
+        "",
+        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    ]
+    
+    # Enhanced escaping: escape PDF literals and aggressively replace non-ASCII characters
+    # to prevent UnicodeEncodeError and ensure compatibility with the Courier font.
+    def esc(t):
+        t = str(t)
+        # Escape PDF literal characters: backslash, parenthesis
+        t = t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        # Replace non-ASCII characters with '?' (safe for Courier font)
+        return t.encode('ascii', 'replace').decode('ascii')
 
-# ---------- PDF SLIP GENERATOR ----------
-def generate_packing_slip(o, assign, material, notes, qr_b64, json_text):
-
-    text = f"""
-PACKING DEPARTMENT – JOB SLIP
-
-Order ID : {o.get('order_id')}
-Customer : {o.get('customer')}
-Item     : {o.get('item')}
-Qty      : {o.get('qty')}
-
-Assigned To  : {assign or '-'}
-Material Used: {material or '-'}
-
-Notes:
-{notes or '-'}
-
-Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-(Scan QR code to view complete JSON)
-"""
-
-    # Build simple PDF manually
+    pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
+    for ln in lines:
+        pdf_text += f"({esc(ln)}) Tj\n0 -18 Td\n"
+    pdf_text += "ET"
+    
     pdf = f"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
-/Contents 4 0 R >>
-endobj
-4 0 obj
-<< /Length {len(text) + 300} >>
-stream
-BT
-/F1 12 Tf
-50 750 Td
-{text.replace("\n", " T* ")}
-ET
-endstream
-endobj
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj <<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Resources << /Font << /F1 5 0 R >> >>
+/Contents 4 0 R
+>> endobj
+4 0 obj << /Length {len(pdf_text)} >> stream
+{pdf_text}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj
 xref
-0 5
-0000000000 65535 f 
-0000000010 00000 n 
-0000000070 00000 n 
-0000000154 00000 n 
-0000000287 00000 n 
-trailer
-<< /Root 1 0 R /Size 5 >>
+0 6
+0000000000 65535 f
+0000000010 00000 n
+0000000065 00000 n
+0000000130 00000 n
+0000000305 00000 n
+0000000550 00000 n
+trailer << /Root 1 0 R /Size 6 >>
 startxref
-500
-%%EOF
-"""
-    return pdf.encode("latin-1")
+700
+%%EOF"""
+    # The final encoding of the PDF structure string remains UTF-8 with errors ignored,
+    # as the content is now ASCII-safe.
+    return pdf.encode("utf-8", errors="ignore")
 
 
 # ---------------- UI: TABS ----------------
@@ -125,7 +175,7 @@ tab1, tab2 = st.tabs([
     f"✔ Completed ({len(completed)})"
 ])
 
-# ---------------- TAB 1 : PENDING PACKING ----------------
+# ---------------- TAB 1: PENDING ----------------
 with tab1:
 
     if not sorted_pending:
@@ -136,164 +186,240 @@ with tab1:
         order_id = o["order_id"]
         start = o.get("packing_start")
         end = o.get("packing_end")
+        packing_file = o.get("packing_file")
 
-        # Calculate delay (36-hour warning)
-        arrived = o.get("assembly_completed_at") or datetime.now().isoformat()
-        arrived_dt = datetime.fromisoformat(arrived)
-        hours_passed = (datetime.now() - arrived_dt).total_seconds() / 3600
+        # Time check (36 hours delay warning)
+        arrived = o.get("assembly_completed_at")
+        hours_passed = 0
+        status_message = ""
+        
+        if arrived:
+            arrived_dt = datetime.fromisoformat(arrived)
+            hours_passed = (datetime.now() - arrived_dt).total_seconds() / 3600
+            
+            if hours_passed > 36:
+                status_message = f"⛔ OVERDUE by **{int(hours_passed)} hours**"
+                status_type = st.error
+            else:
+                status_message = f"🟢 Time since arrived: **{int(hours_passed)} hours**"
+                status_type = st.success
+        else:
+            status_message = "Waiting for Assembly completion timestamp."
+            status_type = st.info
 
-        # ---- HEADER ----
+        qr_b64 = generate_qr_base64(order_id)
+
         with st.container(border=True):
 
-            st.markdown(f"## 📦 {order_id} — {o.get('customer')}")
-            st.caption(f"Item: {o.get('item')} • Qty: {o.get('qty')} • Priority: {o.get('priority')}")
+            # ---- HEADER ----
+            col_id, col_priority, col_status = st.columns([3, 1.5, 3])
+            
+            col_id.markdown(f"### 📦 Order {order_id}")
+            col_id.caption(f"**Customer:** {o.get('customer')} | **Item:** {o.get('item')}")
+            
+            col_priority.metric("Priority", o.get("priority", "Medium"), help="Job Priority")
+            
+            with col_status:
+                st.caption("Time since previous stage:")
+                status_type(status_message)
 
-            if hours_passed > 36:
-                st.error(f"⚠️ Delay: Packing pending for **{int(hours_passed)} hours**")
-            else:
-                st.info(f"⏳ Time since reached packing: **{int(hours_passed)} hours**")
-
-            st.divider()
-
-            # -------- TIME TRACKING --------
-            st.subheader("⏱ Time Tracking")
-
-            if not start:
-                if st.button("▶️ Start Packing", key=f"start_{order_id}", use_container_width=True):
-                    update(f"orders/{key}", {"packing_start": datetime.now().isoformat()})
-                    st.rerun()
-
-            elif not end:
-                if st.button("⏹ End Packing", key=f"end_{order_id}", use_container_width=True):
-                    update(f"orders/{key}", {"packing_end": datetime.now().isoformat()})
-                    st.rerun()
-                st.info(f"Started at: {start}")
-
-            else:
-                st.success(f"Completed at: {end}")
 
             st.divider()
+            
+            col_time_files, col_details = st.columns([1, 1.5])
+            
+            # ==================================
+            # COLUMN 1: TIME & FILES
+            # ==================================
+            with col_time_files:
+                st.subheader("⏱ Time Tracking")
 
-            # -------- DETAILS --------
-            st.subheader("📋 Packing Details")
-
-            assign = st.text_input("Assign To", o.get("packing_assigned"), key=f"assign_{order_id}")
-            material = st.text_input("Material Used", o.get("packing_material"), key=f"material_{order_id}")
-            notes = st.text_area("Notes", o.get("packing_notes"), height=80, key=f"notes_{order_id}")
-
-            if st.button("💾 Save Details", key=f"save_{order_id}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "packing_assigned": assign,
-                    "packing_material": material,
-                    "packing_notes": notes
-                })
-                st.success("Saved")
-                st.rerun()
-
-            st.divider()
-
-            # -------- QR CODE (JSON ENCODED) --------
-            st.subheader("🔳 QR Code")
-
-            qr_json_data = {
-                "order_id": o.get("order_id"),
-                "customer": o.get("customer"),
-                "item": o.get("item"),
-                "qty": o.get("qty"),
-                "priority": o.get("priority"),
-                "stage": "Packing",
-                "product_type": o.get("product_type"),
-                "assign_to": assign,
-                "material_used": material,
-                "notes": notes,
-                "next_stage": "Dispatch",
-                "timestamp": datetime.now().isoformat()
-            }
-
-            json_text = json.dumps(qr_json_data)
-
-            qr_b64 = generate_qr_base64(json_text)
-
-            st.image(base64.b64decode(qr_b64), width=180)
-
-            st.download_button(
-                label="⬇ Download QR Code",
-                data=base64.b64decode(qr_b64),
-                file_name=f"{order_id}_QR.png",
-                mime="image/png",
-                use_container_width=True
-            )
-
-            st.divider()
-
-            # -------- PACKING FILE UPLOAD --------
-            st.subheader("📁 Upload Packing Output File")
-
-            up = st.file_uploader("Upload File", type=["png", "jpg", "jpeg", "pdf"], key=f"file_{order_id}")
-
-            if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and up:
-                encoded = base64.b64encode(up.read()).decode()
-                update(f"orders/{key}", {"packing_file": encoded})
-                st.success("Uploaded")
-                st.rerun()
-
-            if o.get("packing_file"):
-                raw = base64.b64decode(o["packing_file"])
-                if raw[:4] == b"%PDF":
-                    st.info("PDF uploaded — download to view.")
+                if not start:
+                    if st.button("▶️ Start Packing", key=f"start_{order_id}", use_container_width=True, type="secondary"):
+                        update(f"orders/{key}", {"packing_start": datetime.now().isoformat()})
+                        st.rerun()
+                    st.caption("Awaiting start signal.")
+                elif not end:
+                    if st.button("⏹ End Packing", key=f"end_{order_id}", use_container_width=True, type="primary"):
+                        update(f"orders/{key}", {"packing_end": datetime.now().isoformat()})
+                        st.rerun()
+                    st.info(f"Running since: {start.split('T')[1][:5]}")
                 else:
-                    st.image(raw, use_container_width=True)
+                    st.success("Task Completed")
+                    st.markdown(calculate_time_diff(start, end))
+
+                st.markdown("---")
+
+                # -------- QR CODE --------
+                st.subheader("🔳 QR Code Tag")
+                st.image(base64.b64decode(qr_b64), width=180)
 
                 st.download_button(
-                    "⬇ Download File",
-                    raw,
-                    file_name=f"{order_id}_packing_output",
+                    label="⬇ Download QR Code (PNG)",
+                    data=base64.b64decode(qr_b64),
+                    file_name=f"{order_id}_QR.png",
+                    mime="image/png",
+                    key=f"dlqr_{order_id}",
+                    use_container_width=True
+                )
+                
+                st.markdown("---")
+
+                # -------- SLIP --------
+                st.subheader("📄 Job Slip")
+                assign = o.get("packing_assigned", "")
+                material = o.get("packing_material", "")
+                notes = o.get("packing_notes", "")
+                
+                slip_pdf = generate_packing_slip(o, assign, material, notes)
+
+                st.download_button(
+                    label="📥 Download Packing Slip (PDF)",
+                    data=slip_pdf,
+                    file_name=f"{order_id}_packing_slip.pdf",
                     mime="application/pdf",
+                    key=f"dlslip_{order_id}",
                     use_container_width=True
                 )
 
-            st.divider()
 
-            # -------- PACKING SLIP PDF --------
-            st.subheader("📄 Download Packing Slip")
+            # ==================================
+            # COLUMN 2: DETAILS & ACTION
+            # ==================================
+            with col_details:
+                
+                st.subheader("📋 Packing Details")
 
-            slip_pdf = generate_packing_slip(o, assign, material, notes, qr_b64, json_text)
+                assign = st.text_input("Assign To", o.get("packing_assigned", ""), key=f"assign_{order_id}")
+                material = st.text_input("Material Used", o.get("packing_material", ""), key=f"material_{order_id}")
+                notes = st.text_area("Notes", o.get("packing_notes", ""), height=80, key=f"notes_{order_id}")
 
-            st.download_button(
-                label="⬇ Download Packing Slip (PDF)",
-                data=slip_pdf,
-                file_name=f"{order_id}_packing_slip.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-
-            st.divider()
-
-            # -------- MOVE TO DISPATCH --------
-            if end:
-                if st.button("🚚 Move to Dispatch", key=f"move_{order_id}", type="primary", use_container_width=True):
+                if st.button("💾 Save Details", key=f"save_{order_id}", type="secondary", use_container_width=True):
                     update(f"orders/{key}", {
-                        "stage": "Dispatch",
-                        "packing_completed_at": datetime.now().isoformat()
+                        "packing_assigned": assign,
+                        "packing_material": material,
+                        "packing_notes": notes
                     })
-                    st.balloons()
-                    st.success("Moved to Dispatch")
+                    st.toast("Details Saved!")
                     st.rerun()
-            else:
-                st.warning("Complete packing first.")
 
+                st.markdown("---")
 
-# ---------------- TAB 2 : COMPLETED PACKING ----------------
+                # -------- FILE UPLOAD --------
+                st.subheader("📁 Final Output/Proof File")
+
+                # Display uploaded file preview
+                if packing_file:
+                    st.success("✅ Output File Uploaded")
+                    file_type, _, _ = detect_file_type(packing_file)
+                    
+                    if file_type in ["png", "jpg"]:
+                        st.image(base64.b64decode(packing_file), use_container_width=True)
+                    else:
+                        st.info("PDF or unknown file type uploaded. Use the download button.")
+
+                    download_button_ui(
+                        "⬇ Download Final Output", 
+                        packing_file, 
+                        order_id, 
+                        "packing_proof"
+                    )
+
+                else:
+                    st.warning("A final file upload is required to proceed.")
+                
+                up = st.file_uploader("Upload Packing Proof Image/PDF", type=["png", "jpg", "jpeg", "pdf"], key=f"file_{order_id}", label_visibility="collapsed")
+
+                if st.button("💾 Upload & Save File", key=f"save_file_{order_id}", use_container_width=True, disabled=not up):
+                    up.seek(0)
+                    encoded = base64.b64encode(up.read()).decode()
+                    update(f"orders/{key}", {"packing_file": encoded})
+                    st.toast("File uploaded successfully!")
+                    st.rerun()
+
+                st.divider()
+
+                # -------- MOVE TO DISPATCH (READINESS CHECK) --------
+                is_time_ended = bool(end)
+                is_file_uploaded = bool(packing_file)
+
+                is_ready = is_time_ended and is_file_uploaded
+
+                if is_ready:
+                    if st.button("🚚 Move to Dispatch", key=f"move_{order_id}", type="primary", use_container_width=True):
+                        update(f"orders/{key}", {
+                            "stage": "Dispatch",
+                            "packing_completed_at": datetime.now().isoformat()
+                        })
+                        st.balloons()
+                        st.rerun()
+                else:
+                    st.error("⚠ **JOB NOT READY TO MOVE**")
+                    
+                    missing_items = []
+                    if not is_time_ended:
+                        missing_items.append("⏹ End Packing Time")
+                    if not is_file_uploaded:
+                        missing_items.append("📁 Final Output/Proof File Uploaded")
+
+                    if missing_items:
+                        st.markdown(f"""
+                        **Please complete the following missing steps:**
+                        - {'<br>- '.join(missing_items)}
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.warning("Ensure all required steps are finished.")
+
+# ---------------- TAB 2: COMPLETED ----------------
 with tab2:
 
     if not completed:
         st.info("No completed packing jobs yet.")
+        st.stop()
+        
+    # Sort completed by completion date
+    sorted_completed = sorted(
+        completed.items(),
+        key=lambda i: i[1].get("packing_completed_at", "0000-01-01"),
+        reverse=True
+    )
 
-    for key, o in completed.items():
-        with st.container(border=True):
-            st.markdown(f"### ✔ {o['order_id']} — {o.get('customer')}")
-            st.write(f"Completed at: {o.get('packing_completed_at')}")
-            st.write(f"Material Used: {o.get('packing_material')}")
-            st.write(f"Assigned To: {o.get('packing_assigned')}")
-            st.write(f"Notes: {o.get('packing_notes')}")
+    for key, o in sorted_completed:
+        start = o.get("packing_start")
+        end = o.get("packing_end")
+        
+        with st.expander(f"✔ {o['order_id']} — {o.get('customer')} | Completed: {o.get('packing_completed_at', '').split('T')[0]}"):
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Job Time", calculate_time_diff(start, end))
+            c2.metric("Assigned To", o.get("packing_assigned", "N/A"))
+            c3.metric("Next Stage", o.get("stage", "N/A"))
+            
             st.divider()
+            
+            col_data, col_files = st.columns([1, 1])
+
+            with col_data:
+                st.markdown("#### Production Details")
+                st.json({
+                    "Material Used": o.get("packing_material", "N/A"),
+                    "Order Notes": o.get("packing_notes", "None"),
+                    "Completion Time": o.get('packing_completed_at', 'N/A')
+                })
+            
+            with col_files:
+                st.markdown("#### Final Output File & QR")
+                qr_b64 = generate_qr_base64(o["order_id"])
+                
+                st.image(base64.b64decode(qr_b64), width=100)
+                st.caption("QR Code for identification.")
+
+                if o.get("packing_file"):
+                    download_button_ui(
+                        "⬇ Download Final Proof", 
+                        o["packing_file"], 
+                        o["order_id"], 
+                        f"packing_final_{o['order_id']}"
+                    )
+                else:
+                    st.warning("No final file uploaded.")
