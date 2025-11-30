@@ -73,7 +73,7 @@ for key, order in design_orders.items():
                     "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
                 st.success("Design started!")
-                st.experimental_rerun()
+                st.rerun()
 
         with col2:
             if st.button(f"Complete & Move to Printing ({order['order_id']})", key=f"done_{key}"):
