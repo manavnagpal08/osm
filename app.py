@@ -4,7 +4,7 @@ st.set_page_config(page_title="OMS Dashboard", layout="wide")
 
 # Block if not logged in
 if "role" not in st.session_state:
-    st.switch_page("pages/login.py")
+    st.switch_page("secure_pages/login.py")
 
 role = st.session_state["role"]
 
