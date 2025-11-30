@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from firebase import read
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 
 st.set_page_config(page_title="Admin Order Overview", page_icon="📋", layout="wide")
 
@@ -16,8 +16,14 @@ if st.session_state["role"] != "admin":
     st.error("❌ Only admin can view this page.")
     st.stop()
 
-st.title("📋 All Orders Overview Dashboard (Advanced Production Analytics)")
-st.write("View and manage all orders in the system with advanced metrics, stage time analysis, and filtering.")
+st.title("📋 All Orders Overview Dashboard (Executive Production Analytics)")
+st.write("Deep dive into production efficiency, performance against targets, and data quality.")
+
+# -------------------------------------
+# CONFIGURATION
+# -------------------------------------
+# Target KPI for comparison
+ON_TIME_RATE_TARGET = 85.0 # Target 85% On-Time Delivery
 
 # -------------------------------------
 # UTILITY FUNCTIONS
@@ -68,6 +74,84 @@ def get_stage_seconds(order, start_key, end_key):
             return None
     return None
 
+def analyze_kpis(data_list: List[Dict[str, Any]]):
+    """Calculates Cycle Time, On-Time Rate, and Avg Stage Times for a given list of orders."""
+    total_cycle_time_seconds = 0
+    on_time_count = 0
+    completed_count = 0
+    
+    stage_time_totals = {"Design": 0.0, "Printing": 0.0, "DieCut": 0.0, "Assembly": 0.0, "Packing": 0.0}
+    stage_time_counts = {"Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, "Packing": 0}
+
+    completed_orders = [o for o in data_list if o.get('stage') == 'Completed']
+    completed_count = len(completed_orders)
+
+    if completed_count > 0:
+        for order in completed_orders:
+            received_str = order.get('received')
+            completed_str = order.get('dispatched_at') or order.get('packing_completed_at') 
+            due_str = order.get('due')
+
+            # 1. Total Cycle Time & On-Time Check
+            if received_str and completed_str:
+                try:
+                    received_dt = datetime.fromisoformat(received_str)
+                    completed_dt = datetime.fromisoformat(completed_str)
+                    total_cycle_time_seconds += (completed_dt - received_dt).total_seconds()
+                    
+                    if due_str:
+                        due_dt = datetime.fromisoformat(due_str)
+                        if completed_dt <= due_dt:
+                            on_time_count += 1
+                except:
+                    pass 
+            
+            # 2. Individual Stage Times
+            stages_map = [
+                ('Design', 'started_at', 'design_completed_at'),
+                ('Printing', 'printing_started_at', 'printing_completed_at'),
+                ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
+                ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
+                ('Packing', 'packing_start', 'packing_completed_at'),
+            ]
+            
+            for stage, start_key, end_key in stages_map:
+                s = get_stage_seconds(order, start_key, end_key)
+                if s is not None:
+                    stage_time_totals[stage] += s
+                    stage_time_counts[stage] += 1
+                    
+
+        avg_cycle_time_seconds = total_cycle_time_seconds / completed_count
+        avg_cycle_time = str(timedelta(seconds=avg_cycle_time_seconds)).split('.')[0]
+        on_time_rate = (on_time_count / completed_count) * 100
+        
+        # Calculate Average Stage Times (H:M:S string)
+        avg_stage_times = {}
+        for stage, total_s in stage_time_totals.items():
+            count = stage_time_counts[stage]
+            if count > 0:
+                avg_s = total_s / count
+                avg_stage_times[stage] = str(timedelta(seconds=avg_s)).split('.')[0]
+            else:
+                avg_stage_times[stage] = "N/A"
+                
+    else:
+        avg_cycle_time = "N/A"
+        on_time_rate = 0.0
+        avg_stage_times = {}
+        
+    return {
+        "completed_count": completed_count,
+        "on_time_count": on_time_count,
+        "avg_cycle_time": avg_cycle_time,
+        "on_time_rate": on_time_rate,
+        "avg_stage_times": avg_stage_times,
+        "stage_time_totals": stage_time_totals,
+        "stage_time_counts": stage_time_counts,
+    }
+
+
 # -------------------------------------
 # FETCH ORDERS
 # -------------------------------------
@@ -78,86 +162,98 @@ if not orders or not isinstance(orders, dict):
     st.stop()
 
 # -------------------------------------
-# KPI METRICS & VISUALIZATION
+# KPI & DATA QUALITY METRICS
+# -------------------------------------
+all_orders_list = list(orders.values())
+overall_kpis = analyze_kpis(all_orders_list)
+
+# Data Quality Check
+missing_data_count = 0
+for o in all_orders_list:
+    if not o.get('received') or not o.get('due') or not o.get('customer') or not o.get('qty'):
+        missing_data_count += 1
+data_quality_percent = f"{(1 - (missing_data_count / total_orders)) * 100:.1f}%"
+data_quality_delta = f"-{missing_data_count} orders missing critical fields"
+
+
+# -------------------------------------
+# KPI COMPARISON AND DISPLAY
 # -------------------------------------
 
-total_orders = len(orders)
-completed_orders_data = [o for o in orders.values() if o.get('stage') == 'Completed']
-total_completed = len(completed_orders_data)
-in_progress_orders = total_orders - total_completed
+on_time_rate = overall_kpis['on_time_rate']
+on_time_delta = f"{on_time_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
 
-st.subheader("Key Performance Indicators")
-
-# New KPI Calculations: Cycle Time, On-Time Rate & Average Stage Times
-total_cycle_time_seconds = 0
-on_time_count = 0
-stage_time_totals = {"Design": 0.0, "Printing": 0.0, "DieCut": 0.0, "Assembly": 0.0, "Packing": 0.0}
-stage_time_counts = {"Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, "Packing": 0}
-
-
-if total_completed > 0:
-    for order in completed_orders_data:
-        received_str = order.get('received')
-        # Use dispatched_at or packing_completed_at for the final timestamp
-        completed_str = order.get('dispatched_at') or order.get('packing_completed_at') 
-        due_str = order.get('due')
-
-        # 1. Total Cycle Time & On-Time Check
-        if received_str and completed_str:
-            try:
-                received_dt = datetime.fromisoformat(received_str)
-                completed_dt = datetime.fromisoformat(completed_str)
-                total_cycle_time_seconds += (completed_dt - received_dt).total_seconds()
-                
-                if due_str:
-                    due_dt = datetime.fromisoformat(due_str)
-                    if completed_dt <= due_dt:
-                        on_time_count += 1
-            except:
-                pass 
-        
-        # 2. Individual Stage Times
-        stages_map = [
-            ('Design', 'started_at', 'design_completed_at'),
-            ('Printing', 'printing_started_at', 'printing_completed_at'),
-            ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
-            ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
-            ('Packing', 'packing_start', 'packing_completed_at'),
-        ]
-        
-        for stage, start_key, end_key in stages_map:
-            s = get_stage_seconds(order, start_key, end_key)
-            if s is not None:
-                stage_time_totals[stage] += s
-                stage_time_counts[stage] += 1
-                
-
-    avg_cycle_time_seconds = total_cycle_time_seconds / total_completed
-    avg_cycle_time = str(timedelta(seconds=avg_cycle_time_seconds)).split('.')[0]
-    on_time_rate = f"{(on_time_count / total_completed) * 100:.1f}%"
-    
-    # Calculate Average Stage Times (H:M:S string)
-    avg_stage_times = {}
-    for stage, total_s in stage_time_totals.items():
-        count = stage_time_counts[stage]
-        if count > 0:
-            avg_s = total_s / count
-            avg_stage_times[stage] = str(timedelta(seconds=avg_s)).split('.')[0]
-        else:
-            avg_stage_times[stage] = "N/A"
-            
-else:
-    avg_cycle_time = "N/A"
-    on_time_rate = "N/A"
-    avg_stage_times = {}
-
-# Display Core KPIs
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Orders", total_orders, "Total in System")
-col2.metric("Orders In Progress", in_progress_orders, "Currently Active")
-col3.metric("Orders Completed", total_completed, "Finalized")
-col4.metric("Avg. Cycle Time", avg_cycle_time, "Received to Final")
-col5.metric("On-Time Delivery Rate", on_time_rate, f"{on_time_count} of {total_completed} on time")
+col2.metric("Orders In Progress", overall_kpis['completed_count'] - total_orders, "Currently Active", delta_color="normal")
+col3.metric("Avg. Cycle Time", overall_kpis['avg_cycle_time'], "Received to Final")
+col4.metric(
+    "On-Time Delivery Rate", 
+    f"{on_time_rate:.1f}%", 
+    delta=on_time_delta, 
+    delta_color="normal" if on_time_rate >= ON_TIME_RATE_TARGET else "inverse"
+)
+col5.metric(
+    "Data Quality Score", 
+    data_quality_percent, 
+    delta=data_quality_delta, 
+    delta_color="inverse"
+)
+
+st.divider()
+
+# -------------------------------------
+# SEGMENTED KPI ANALYSIS BY PRODUCT TYPE
+# -------------------------------------
+st.subheader("Segmented Performance Analysis")
+
+bag_orders = [o for o in all_orders_list if o.get('product_type') == 'Bag']
+box_orders = [o for o in all_orders_list if o.get('product_type') == 'Box']
+
+bag_kpis = analyze_kpis(bag_orders)
+box_kpis = analyze_kpis(box_orders)
+
+col_seg1, col_seg2 = st.columns(2)
+
+# Bag Segment
+with col_seg1:
+    st.markdown("#### Product Type: Bag")
+    if bag_kpis['completed_count'] > 0:
+        bag_rate = bag_kpis['on_time_rate']
+        bag_delta = f"{bag_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
+        
+        st.metric(
+            "OTD Rate (Bags)", 
+            f"{bag_rate:.1f}%", 
+            delta=bag_delta,
+            delta_color="normal" if bag_rate >= ON_TIME_RATE_TARGET else "inverse"
+        )
+        st.markdown(f"**Avg. Cycle Time:** {bag_kpis['avg_cycle_time']}")
+        st.caption(f"{bag_kpis['completed_count']} completed orders analyzed.")
+        with st.expander("Bag Stage Time Breakdown"):
+            st.json(bag_kpis['avg_stage_times'])
+    else:
+        st.info("No completed 'Bag' orders for analysis.")
+
+# Box Segment
+with col_seg2:
+    st.markdown("#### Product Type: Box")
+    if box_kpis['completed_count'] > 0:
+        box_rate = box_kpis['on_time_rate']
+        box_delta = f"{box_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
+        
+        st.metric(
+            "OTD Rate (Boxes)", 
+            f"{box_rate:.1f}%", 
+            delta=box_delta,
+            delta_color="normal" if box_rate >= ON_TIME_RATE_TARGET else "inverse"
+        )
+        st.markdown(f"**Avg. Cycle Time:** {box_kpis['avg_cycle_time']}")
+        st.caption(f"{box_kpis['completed_count']} completed orders analyzed.")
+        with st.expander("Box Stage Time Breakdown"):
+            st.json(box_kpis['avg_stage_times'])
+    else:
+        st.info("No completed 'Box' orders for analysis.")
 
 st.divider()
 
@@ -184,13 +280,13 @@ with col_viz1:
 
 # Visualization 2: Average Stage Time
 with col_viz2:
-    if total_completed > 0 and any(stage_time_counts.values()):
+    if overall_kpis['completed_count'] > 0 and any(overall_kpis['stage_time_counts'].values()):
         avg_time_chart_data = {
             'Stage': [],
             'Avg_Seconds': []
         }
-        for stage, total_s in stage_time_totals.items():
-            count = stage_time_counts[stage]
+        for stage, total_s in overall_kpis['stage_time_totals'].items():
+            count = overall_kpis['stage_time_counts'][stage]
             if count > 0:
                 avg_time_chart_data['Stage'].append(stage)
                 avg_time_chart_data['Avg_Seconds'].append(total_s / count)
@@ -201,8 +297,6 @@ with col_viz2:
         
         st.subheader("Avg. Time Spent Per Stage (Completed Orders)")
         st.bar_chart(avg_df['Avg Time (Min)'])
-        with st.expander("Average Stage Time Breakdown (H:M:S)"):
-            st.json(avg_stage_times)
     else:
         st.info("Insufficient data for Average Stage Time analysis.")
 
@@ -212,24 +306,37 @@ st.divider()
 # -------------------------------------
 # FILTERS PANEL (Moved to Main Screen)
 # -------------------------------------
-with st.expander("🔍 Filter & Search Orders", expanded=False):
+
+# Quick Filters for immediate action
+st.markdown("#### Quick Action Filters")
+col_q1, col_q2, col_q3 = st.columns(3)
+quick_filter = col_q1.selectbox(
+    "Quick Filter Set",
+    ["None", "Late or Past Due", "High Priority Active", "Data Quality Issues"]
+)
+
+# Standard Filters (in expander)
+with st.expander("🔍 Advanced Filter & Search Orders", expanded=False):
     
     st.markdown("##### Filter by Stage, Product, and Priority")
     col_s1, col_s2, col_s3 = st.columns(3)
     
     stage_filter = col_s1.selectbox(
         "Stage",
-        ["All", "Design", "Printing", "DieCut", "Assembly", "Packing", "Dispatch", "Completed"]
+        ["All", "Design", "Printing", "DieCut", "Assembly", "Packing", "Dispatch", "Completed"],
+        key="stage_f"
     )
     
     product_filter = col_s2.selectbox(
         "Product Type",
-        ["All", "Bag", "Box"]
+        ["All", "Bag", "Box"],
+        key="product_f"
     )
     
     priority_filter = col_s3.selectbox(
         "Priority",
-        ["All", "High", "Medium", "Low"]
+        ["All", "High", "Medium", "Low"],
+        key="priority_f"
     )
 
     st.markdown("---")
@@ -254,28 +361,58 @@ st.caption("Expand the filter box above to refine your search.")
 # -------------------------------------
 
 filtered: Dict[str, Any] = {}
-# Prepare datetime objects for range comparison (start of day / end of day)
 start_dt = datetime.combine(start_date_filter, datetime.min.time())
 end_dt = datetime.combine(end_date_filter, datetime.max.time())
+now = datetime.now()
 
 for key, o in orders.items():
 
     if not isinstance(o, dict):
         continue
+    
+    # --- QUICK FILTERS ---
+    if quick_filter == "Late or Past Due":
+        due_str = o.get('due')
+        completed_str = o.get('dispatched_at') or o.get('packing_completed_at')
+        is_completed = o.get('stage') == 'Completed'
+        is_late = False
 
-    # STAGE FILTER
+        if due_str:
+            try:
+                due_dt = datetime.fromisoformat(due_str)
+                
+                if is_completed and completed_str:
+                    # Completed late
+                    if datetime.fromisoformat(completed_str) > due_dt:
+                        is_late = True
+                elif not is_completed:
+                    # In progress and past due date
+                    if now > due_dt:
+                        is_late = True
+            except:
+                pass 
+        
+        if not is_late:
+            continue
+            
+    elif quick_filter == "High Priority Active":
+        if o.get('priority') != 'High' or o.get('stage') == 'Completed':
+            continue
+
+    elif quick_filter == "Data Quality Issues":
+        if o.get('received') and o.get('due') and o.get('customer') and o.get('qty'):
+            continue
+            
+    # --- STANDARD FILTERS ---
     if stage_filter != "All" and o.get("stage") != stage_filter:
         continue
 
-    # PRODUCT TYPE FILTER
     if product_filter != "All" and o.get("product_type") != product_filter:
         continue
 
-    # PRIORITY FILTER
     if priority_filter != "All" and o.get("priority") != priority_filter:
         continue
         
-    # DATE FILTER (uses 'received' timestamp)
     received_str = o.get("received")
     if received_str:
         try:
@@ -283,14 +420,11 @@ for key, o in orders.items():
             if received_dt < start_dt or received_dt > end_dt:
                 continue
         except:
-            # Skip if date is malformed
             continue 
 
-    # CUSTOMER FILTER
     if customer_filter and customer_filter.lower() not in o.get("customer", "").lower():
         continue
 
-    # ORDER ID FILTER
     if order_search and order_search.lower() not in o.get("order_id", "").lower():
         continue
 
@@ -312,12 +446,28 @@ sorted_filtered_list: list[Tuple[str, Any]] = sorted(
     reverse=True # Show newest first
 )
 
-# --- Summary Table (New Feature) ---
+# --- Summary Table ---
 summary_data = []
 for key, order in sorted_filtered_list:
     stage = order.get('stage', 'N/A')
     
     total_order_cycle = ""
+    is_late_indicator = "🟢 On Time"
+    
+    due_dt_raw = order.get('due')
+    
+    if due_dt_raw:
+        try:
+            due_dt = datetime.fromisoformat(due_dt_raw)
+            if stage == 'Completed':
+                completed_str = order.get('dispatched_at') or order.get('packing_completed_at')
+                if completed_str and datetime.fromisoformat(completed_str) > due_dt:
+                    is_late_indicator = "🔴 Late"
+            elif datetime.now() > due_dt:
+                is_late_indicator = "🟠 Past Due"
+        except:
+            is_late_indicator = "🟡 Due Date Error"
+
     if stage == 'Completed':
          total_order_cycle = calculate_stage_duration(order.get('received'), order.get('dispatched_at') or order.get('packing_completed_at'))
 
@@ -330,6 +480,7 @@ for key, order in sorted_filtered_list:
         "Quantity": order.get('qty', 'N/A'),
         "Received": order.get('received', 'N/A').split('T')[0],
         "Due Date": order.get('due', 'N/A').split('T')[0],
+        "Status": is_late_indicator,
         "Total Cycle Time": total_order_cycle if stage == 'Completed' else 'In Progress',
     })
 
