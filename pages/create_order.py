@@ -8,23 +8,23 @@ from utils import generate_order_id
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
-# Only admin + design department can create orders
 if st.session_state["role"] not in ["admin", "design"]:
     st.error("❌ You do not have permission to access this page.")
     st.stop()
 
 st.title("📦 Create New Order")
 
-st.write("Fill the details below to create a new manufacturing order.")
-
-# -----------------------------
-# AUTO ORDER ID (SRP001...)
-# -----------------------------
 order_id = generate_order_id()
 st.text_input("Order ID", order_id, disabled=True)
 
 # -----------------------------
-# ORDER FORM FIELDS
+# New Fields: PRODUCT TYPE + PRIORITY
+# -----------------------------
+product_type = st.selectbox("Product Type", ["Bag", "Box"])
+priority = st.selectbox("Priority", ["High", "Medium", "Low"])
+
+# -----------------------------
+# ORDER FIELDS
 # -----------------------------
 customer = st.text_input("Customer Name")
 item = st.text_area("Product Description")
@@ -36,34 +36,34 @@ with col1:
 with col2:
     due_date = st.date_input("Due Date")
 
-st.subheader("Additional Order Information")
+new_or_repeat = st.selectbox("Order Type", ["New", "Repeat"])
+advance = st.radio("Advance Received?", ["Yes", "No"])
 
-col3, col4 = st.columns(2)
-with col3:
-    new_or_repeat = st.selectbox("Order Type", ["New", "Repeat"])
-with col4:
-    advance = st.radio("Advance Received?", ["Yes", "No"])
-
+# Optional fields
 foil = st.text_input("Foil Printing ID (optional)")
 spotuv = st.text_input("Spot UV ID (optional)")
-brand_thickness = st.text_input("Brand Thickness / Quality ID (optional)")
-paper_thickness = st.text_input("Paper Thickness / Quality ID (optional)")
+brand_thickness = st.text_input("Brand Thickness ID (optional)")
+paper_thickness = st.text_input("Paper Thickness ID (optional)")
 size = st.text_input("Size ID (optional)")
 rate = st.number_input("Rate (optional)", min_value=0.0)
 
 # -----------------------------
-# SUBMIT BUTTON
+# SUBMIT ORDER
 # -----------------------------
 if st.button("Create Order", type="primary", use_container_width=True):
 
-    # Validation
-    if not customer or not item or qty <= 0:
-        st.error("⚠️ Please fill all required fields.")
+    if not customer or not item:
+        st.error("⚠️ Fill all required fields")
         st.stop()
 
-    # Order payload
+    # For BAG -> next stage after Printing → Assembly
+    # For BOX -> next stage after Printing → DieCut
+    next_route = "DieCut" if product_type == "Box" else "Assembly"
+
     data = {
         "order_id": order_id,
+        "product_type": product_type,
+        "priority": priority,
         "customer": customer,
         "item": item,
         "qty": qty,
@@ -77,16 +77,9 @@ if st.button("Create Order", type="primary", use_container_width=True):
         "paper_thickness_id": paper_thickness,
         "size_id": size,
         "rate": rate,
-        "stage": "Design",       # All new orders go to design first
-        "status_history": {
-            "created_by": st.session_state["username"],
-            "created_role": st.session_state["role"],
-        }
+        "stage": "Design",
+        "next_after_printing": next_route
     }
 
-    # Save to Firebase
     push("orders", data)
-
-    st.success(f"✅ Order **{order_id}** created successfully!")
-    st.balloons()
-
+    st.success(f"Order {order_id} created successfully!")
