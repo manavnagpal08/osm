@@ -92,7 +92,8 @@ def download_button_ui(label: str, b64: Optional[str], order_id: str, fname: str
 
 # ---------- QR CODE GENERATOR ----------
 def generate_qr_base64(data: str):
-    qr = qrcode.QRCode(box_size=6, border=2)
+    # Increased box_size and border for better readability of large JSON strings
+    qr = qrcode.QRCode(box_size=8, border=4)
     qr.add_data(data)
     qr.make(fit=True)
 
@@ -277,7 +278,13 @@ with tab1:
 
                 # -------- QR CODE --------
                 st.subheader("🔳 QR Code Tag")
-                st.image(base64.b64decode(qr_b64), width=180)
+                # Increased display width for better readability
+                st.image(base64.b64decode(qr_b64), width=200) 
+                
+                # DEBUG: Show the size of the data and the JSON content
+                st.info(f"QR Data Size: **{len(json_text)} bytes**")
+                with st.expander("View Encoded JSON Data (Debug)"):
+                    st.code(json_text, language="json")
 
                 st.download_button(
                     label="⬇ Download QR Code (PNG)",
@@ -439,10 +446,16 @@ with tab2:
                     "stage": "Completed/Dispatch",
                     "completion_time": o.get('packing_completed_at', 'N/A')
                 }
-                qr_b64 = generate_qr_base64(json.dumps(qr_json_data))
+                data_text_completed = json.dumps(qr_json_data)
+                qr_b64 = generate_qr_base64(data_text_completed)
                 
                 st.image(base64.b64decode(qr_b64), width=100)
                 st.caption("QR Code for identification.")
+                
+                # DEBUG: Show the size of the data and the JSON content
+                st.info(f"QR Data Size: **{len(data_text_completed)} bytes**")
+                with st.expander("View Encoded JSON Data (Debug)"):
+                    st.code(data_text_completed, language="json")
 
                 if o.get("packing_file"):
                     download_button_ui(
