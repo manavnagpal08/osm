@@ -1,8 +1,9 @@
 import streamlit as st
 from firebase import read, update
-from datetime import datetime, timedelta
+from datetime import datetime
 import base64
 import io
+import qrcode
 
 st.set_page_config(page_title="Packing Department", page_icon="📦", layout="wide")
 
@@ -19,7 +20,8 @@ st.caption("Handle packing, generate QR codes, track time, assign work & move or
 
 # ---------------- LOAD ORDERS ----------------
 orders = read("orders") or {}
-pending, completed = {}, {}
+pending = {}
+completed = {}
 
 for key, o in orders.items():
     if not isinstance(o, dict):
@@ -30,7 +32,7 @@ for key, o in orders.items():
     elif o.get("packing_completed_at"):
         completed[key] = o
 
-# ---------- PRIORITY SORTING ----------
+# --------- SORT BY PRIORITY ----------
 priority_rank = {"High": 0, "Medium": 1, "Low": 2}
 
 sorted_pending = sorted(
@@ -41,15 +43,16 @@ sorted_pending = sorted(
     )
 )
 
-# ---------- QR CODE GENERATOR (NO LIBRARY) ----------
+# ---------- QR CODE GENERATOR ----------
 def generate_qr_base64(data: str):
-    """Uses Google Chart API to generate QR code PNG"""
-    import urllib.parse
-    encoded = urllib.parse.quote(data)
-    url = f"https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl={encoded}"
-    import requests
-    img = requests.get(url).content
-    return base64.b64encode(img).decode()
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(data)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 # ---------- PDF SLIP ----------
 def generate_packing_slip(o, assign, material, notes, qr_b64):
@@ -70,8 +73,7 @@ Notes:
 Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
 
-    # Embed QR base64 as text (viewable after download)
-    body += "\n\nQR Code Embedded."
+    body += "\n\n(Scan QR Code for product identification)"
 
     pdf = f"""%PDF-1.4
 1 0 obj
@@ -127,7 +129,7 @@ with tab1:
         start = o.get("packing_start")
         end = o.get("packing_end")
 
-        # Time check (36 hours warning)
+        # Time check (36 hours delay warning)
         arrived = o.get("assembly_completed_at") or datetime.now().isoformat()
         arrived_dt = datetime.fromisoformat(arrived)
         hours_passed = (datetime.now() - arrived_dt).total_seconds() / 3600
@@ -187,7 +189,6 @@ with tab1:
             # -------- QR CODE --------
             st.subheader("🔳 QR Code for Order Identification")
             st.image(base64.b64decode(qr_b64), width=180)
-            st.caption("Scan this to identify the product instantly.")
 
             st.download_button(
                 label="⬇ Download QR Code",
@@ -199,10 +200,10 @@ with tab1:
 
             st.divider()
 
-            # -------- OUTPUT FILES --------
+            # -------- FILE UPLOAD --------
             st.subheader("📁 Upload Packing Output File")
 
-            up = st.file_uploader("Upload File", type=["png", "jpg", "pdf"], key=f"file_{order_id}")
+            up = st.file_uploader("Upload File", type=["png", "jpg", "jpeg", "pdf"], key=f"file_{order_id}")
 
             if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and up:
                 encoded = base64.b64encode(up.read()).decode()
@@ -211,7 +212,16 @@ with tab1:
                 st.rerun()
 
             if o.get("packing_file"):
-                st.image(base64.b64decode(o["packing_file"]), use_container_width=True)
+                try:
+                    st.image(base64.b64decode(o["packing_file"]), use_container_width=True)
+                except:
+                    st.info("PDF uploaded — download to view.")
+                    st.download_button(
+                        "⬇ Download File",
+                        base64.b64decode(o["packing_file"]),
+                        file_name=f"{order_id}_packing_file.pdf",
+                        mime="application/pdf"
+                    )
 
             st.divider()
 
@@ -245,6 +255,7 @@ with tab1:
 
 # ---------------- TAB 2: COMPLETED ----------------
 with tab2:
+
     if not completed:
         st.info("No completed packing jobs yet.")
 
