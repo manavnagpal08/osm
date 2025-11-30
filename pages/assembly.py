@@ -367,8 +367,12 @@ with tab1:
 
                 st.markdown("---")
 
-                # --- MOVE TO NEXT STAGE ---
-                is_ready = file_asm and end and assembled_qty_input > 0
+                # --- MOVE TO NEXT STAGE (IMPROVED ERROR MESSAGE) ---
+                is_file_uploaded = bool(file_asm)
+                is_time_ended = bool(end)
+                is_qty_recorded = assembled_qty_input > 0
+
+                is_ready = is_file_uploaded and is_time_ended and is_qty_recorded
 
                 if is_ready:
                     if st.button("🚀 Move to Packing", key=f"next_{order_id}", type="primary", use_container_width=True):
@@ -379,7 +383,24 @@ with tab1:
                         st.balloons()
                         st.rerun()
                 else:
-                    st.error("⚠ Cannot proceed. Ensure time tracking is ended, assembled quantity is recorded, and the output file is uploaded.")
+                    st.error("⚠ **JOB NOT READY TO MOVE**")
+                    
+                    missing_items = []
+                    if not is_time_ended:
+                        missing_items.append("⏹ End Assembly Time")
+                    if not is_qty_recorded:
+                        missing_items.append("🔢 Assembled Quantity (> 0)")
+                    if not is_file_uploaded:
+                        missing_items.append("📁 Output File Uploaded")
+
+                    if missing_items:
+                        st.markdown(f"""
+                        **Please complete the following missing steps:**
+                        - {'<br>- '.join(missing_items)}
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.warning("Ensure all fields are saved and time is ended.") # Fallback just in case
+                        
 
 
 # -----------------------------------------
