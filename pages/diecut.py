@@ -125,7 +125,7 @@ def preview(label: str, b64: Optional[str], order_id: str):
 
 
 # ---------------------------------------------------
-# PDF GENERATOR — PURE PYTHON (Kept as provided)
+# PDF GENERATOR — PURE PYTHON
 # ---------------------------------------------------
 def generate_diecut_slip(order, machine, blade, assign_to, die_paper, die_board,
                          cut_per_sheet, cut_per_board, total_sheets, total_boards, notes):
@@ -435,9 +435,9 @@ with tab1:
                 is_ready = file_dc and end
 
                 if is_ready:
-                    if st.button("🚀 Move to Lamination", key=f"move_{order_id}", type="primary", use_container_width=True):
+                    if st.button("🚀 Move to Assembly", key=f"move_{order_id}", type="primary", use_container_width=True):
                         update(f"orders/{key}", {
-                            "stage": "Lamination",
+                            "stage": "Assembly", # CHANGED FROM Lamination TO Assembly
                             "diecut_completed_at": datetime.now().isoformat()
                         })
                         st.balloons()
@@ -532,3 +532,13 @@ with tab2:
                 mime="application/pdf",
                 key=f"dl_slip_arch_{order_id}"
             )
+```
+eof
+
+I updated the logic on line 377 to change the `stage` to `"Assembly"`.
+
+```python
+                        update(f"orders/{key}", {
+                            "stage": "Assembly", # CHANGED
+                            "diecut_completed_at": datetime.now().isoformat()
+                        })
