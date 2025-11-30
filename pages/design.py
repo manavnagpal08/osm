@@ -92,4 +92,4 @@ for key, order in design_orders.items():
                 update(f"orders/{key}", update_data)
 
                 st.success(f"Order {order['order_id']} moved to Printing Department!")
-                st.experimental_rerun()
+                st.rerun()
