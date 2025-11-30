@@ -78,7 +78,7 @@ for key, order in assembly_orders.items():
                     "assembly_started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 st.success("Assembly started!")
-                st.experimental_rerun()
+                st.rerun()
 
         with colB:
             if st.button(f"Complete & Move to Dispatch ({order['order_id']})", key=f"doneass_{key}"):
@@ -92,4 +92,4 @@ for key, order in assembly_orders.items():
                 })
 
                 st.success(f"Order {order['order_id']} moved to Dispatch!")
-                st.experimental_rerun()
+                st.rerun()
