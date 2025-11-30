@@ -1,7 +1,7 @@
 import streamlit as st
 from firebase import read, update
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # -----------------------------------------
 # PAGE CONFIG
@@ -19,22 +19,19 @@ if st.session_state["role"] not in ["assembly", "admin"]:
     st.stop()
 
 st.title("🟩 Assembly Department")
-st.caption("Manage assembly work, record output, assign workers & generate job slips.")
+st.caption("Manage assembly work, record output, assign workers, monitor deadlines & generate slips.")
 
 # -----------------------------------------
 # LOAD ORDERS
 # -----------------------------------------
 orders = read("orders") or {}
 
-pending = {}
-completed = {}
+pending, completed = {}, {}
 
 for key, o in orders.items():
-
     if not isinstance(o, dict):
         continue
 
-    # Bags and Boxes both reach Assembly
     if o.get("stage") == "Assembly":
         pending[key] = o
     elif o.get("assembly_completed_at"):
@@ -46,13 +43,10 @@ for key, o in orders.items():
 # -----------------------------------------
 def detect_file_type(data):
     raw = base64.b64decode(data)
-    head = raw[:10]
-    if head.startswith(b"%PDF"):
-        return "pdf", "application/pdf", ".pdf"
-    if head.startswith(b"\x89PNG"):
-        return "png", "image/png", ".png"
-    if head[:3] == b"\xff\xd8\xff":
-        return "jpg", "image/jpeg", ".jpg"
+    header = raw[:10]
+    if header.startswith(b"%PDF"): return "pdf", "application/pdf", ".pdf"
+    if header.startswith(b"\x89PNG"): return "png", "image/png", ".png"
+    if header[:3] == b"\xff\xd8\xff": return "jpg", "image/jpeg", ".jpg"
     return "bin", "application/octet-stream", ".bin"
 
 
@@ -62,50 +56,69 @@ def preview(label, b64):
         return
     raw = base64.b64decode(b64)
     if raw.startswith(b"%PDF"):
-        st.info("PDF preview not supported — download to view.")
+        st.info("PDF preview not supported → Download to view.")
     else:
         st.image(raw, use_container_width=True)
 
 
 def download_button_ui(label, b64, order_id, fname):
-    if not b64:
+    if not b64: 
         return
     raw = base64.b64decode(b64)
     _, mime, ext = detect_file_type(b64)
+
+    st.markdown(
+        f"""
+        <style>
+        .download-btn-{order_id} {{
+            background: linear-gradient(90deg,#4CAF50,#0A7B32);
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     st.download_button(
         label=label,
         data=raw,
         file_name=f"{order_id}_{fname}{ext}",
         mime=mime,
+        key=f"dl_{fname}_{order_id}",
         use_container_width=True
     )
 
 
 # -----------------------------------------
-# PDF — PURE PYTHON
+# PURE PYTHON PDF SLIP
 # -----------------------------------------
-def generate_assembly_slip(order, assembled_qty, assign_to, notes):
+def generate_slip(order, assembled_qty, assign_to, material, notes):
 
     lines = [
         "ASSEMBLY DEPARTMENT – WORK SLIP",
         "",
         f"Order ID: {order.get('order_id')}",
         f"Customer: {order.get('customer')}",
-        f"Item: {order.get('item')}",
         "",
+        f"Item: {order.get('item')}",
         f"Order Quantity: {order.get('qty')}",
         f"Assembled Quantity: {assembled_qty}",
         f"Remaining: {max(order.get('qty', 0) - assembled_qty, 0)}",
         "",
+        f"Material Used: {material}",
         f"Assigned To: {assign_to}",
         "",
         "Notes:",
         notes or "-",
         "",
-        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ]
 
-    def esc(s): return s.replace("(", "\\(").replace(")", "\\)")
+    def esc(t): return t.replace("(", "\\(").replace(")", "\\)")
 
     pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
     for ln in lines:
@@ -131,15 +144,14 @@ xref
 0000000000 65535 f
 0000000010 00000 n
 0000000065 00000 n
-0000000134 00000 n
-0000000325 00000 n
-0000000571 00000 n
+0000000130 00000 n
+0000000305 00000 n
+0000000550 00000 n
 trailer << /Root 1 0 R /Size 6 >>
 startxref
 700
-%%EOF
-"""
-    return pdf.encode("utf-8", errors="ignore")
+%%EOF"""
+    return pdf.encode("latin-1", errors="ignore")
 
 
 # -----------------------------------------
@@ -152,33 +164,49 @@ tab1, tab2 = st.tabs([
 
 
 # -----------------------------------------
-# TAB: PENDING
+# PENDING
 # -----------------------------------------
 with tab1:
 
     if not pending:
-        st.success("🎉 No pending Assembly work!")
+        st.success("🎉 All assembly jobs completed!")
 
     for key, o in pending.items():
 
         order_id = o["order_id"]
-        file_assembly = o.get("assembly_file")
+        file_asm = o.get("assembly_file")
 
         with st.container(border=True):
 
             st.subheader(f"🟩 Order {order_id}")
-            st.write(f"**Customer:** {o.get('customer')}  —  **Item:** {o.get('item')}  —  **Qty:** {o.get('qty')}")
+            st.write(f"**Customer:** {o.get('customer')}  |  **Item:** {o.get('item')}  |  **Qty:** {o.get('qty')}")
+
+            # ---------------- DEADLINE WATCH ----------------
+            st.markdown("### ⏳ Deadline Monitoring")
+
+            start_design_out = o.get("printing_completed_at") or o.get("diecut_completed_at")
+            if start_design_out:
+                start_time = datetime.fromisoformat(start_design_out)
+                deadline = start_time + timedelta(hours=36)
+
+                now = datetime.now()
+
+                if now > deadline:
+                    st.error(f"⛔ OVERDUE by {(now - deadline)}")
+                else:
+                    remaining = deadline - now
+                    st.success(f"🟢 Time Remaining: {remaining}")
 
             st.divider()
 
             # ---------------- TIME TRACKING ----------------
-            st.subheader("⏱ Time Tracking")
+            st.markdown("### 🕒 Time Tracking")
 
             start = o.get("assembly_start")
             end = o.get("assembly_end")
 
             if not start:
-                if st.button("▶️ Start Assembly", key=f"start_{order_id}", use_container_width=True):
+                if st.button("▶ Start Assembly", key=f"start_{order_id}", use_container_width=True):
                     update(f"orders/{key}", {"assembly_start": datetime.now().isoformat()})
                     st.rerun()
 
@@ -189,14 +217,13 @@ with tab1:
                 st.info(f"Started at: {start}")
 
             else:
-                st.success("Assembly Completed")
-                st.caption(f"Start: {start}")
-                st.caption(f"End: {end}")
+                st.success("✔ Assembly Completed")
+                st.caption(f"Start: {start} | End: {end}")
 
             st.divider()
 
-            # ---------------- ASSEMBLY DETAILS ----------------
-            st.subheader("📋 Assembly Work Details")
+            # ---------------- DETAILS FORM ----------------
+            st.markdown("### 🧾 Assembly Details")
 
             qty = o.get("qty", 1)
 
@@ -205,30 +232,38 @@ with tab1:
                 min_value=0,
                 max_value=qty,
                 value=o.get("assembled_qty", 0),
-                key=f"asm_qty_{order_id}"
+                key=f"asmqty_{order_id}"
             )
 
             assign_to = st.text_input(
                 "Assign Worker",
-                value=o.get("assembly_assigned_to", ""),
-                placeholder="e.g., Manish, Rohan, Salim",
-                key=f"asm_assign_{order_id}"
+                o.get("assembly_assigned_to", ""),
+                key=f"assign_{order_id}",
+                placeholder="e.g., Rohan / Sameer"
             )
 
-            remaining = max(qty - assembled_qty, 0)
-            st.info(f"Remaining: **{remaining} pcs**")
+            material = st.text_input(
+                "Material Used",
+                o.get("assembly_material", ""),
+                placeholder="e.g., White Glue, 180 GSM Board",
+                key=f"mat_{order_id}"
+            )
 
             notes = st.text_area(
                 "Notes",
-                value=o.get("assembly_notes", ""),
-                key=f"asm_notes_{order_id}",
-                height=70
+                o.get("assembly_notes", ""),
+                key=f"notes_{order_id}",
+                height=80
             )
 
-            if st.button("💾 Save Assembly Data", key=f"save_asm_{order_id}", use_container_width=True):
+            remaining = qty - assembled_qty
+            st.info(f"Remaining Quantity: **{remaining} pcs**")
+
+            if st.button("💾 Save Data", key=f"save_{order_id}", use_container_width=True):
                 update(f"orders/{key}", {
                     "assembled_qty": assembled_qty,
                     "assembly_assigned_to": assign_to,
+                    "assembly_material": material,
                     "assembly_notes": notes
                 })
                 st.success("Saved!")
@@ -237,33 +272,33 @@ with tab1:
             st.divider()
 
             # ---------------- FILE UPLOAD ----------------
-            st.subheader("📁 Upload Assembly Output")
+            st.markdown("### 📁 Assembly Output File")
 
-            up = st.file_uploader(
-                "Upload File",
+            upload = st.file_uploader(
+                "Upload File (JPG, PNG, PDF)",
                 type=["png", "jpg", "jpeg", "pdf"],
                 key=f"upasm_{order_id}"
             )
 
-            if st.button("💾 Save File", key=f"save_fileasm_{order_id}", use_container_width=True) and up:
-                encoded = base64.b64encode(up.read()).decode()
+            if st.button("💾 Save File", key=f"svf_{order_id}", use_container_width=True) and upload:
+                encoded = base64.b64encode(upload.read()).decode()
                 update(f"orders/{key}", {"assembly_file": encoded})
-                st.success("File Uploaded!")
+                st.success("File uploaded!")
                 st.rerun()
 
-            if file_assembly:
-                preview("Assembly File", file_assembly)
-                download_button_ui("⬇ Download File", file_assembly, order_id, "assembly")
+            if file_asm:
+                preview("Assembly Output", file_asm)
+                download_button_ui("⬇ Download Assembly File", file_asm, order_id, "assembly")
 
             st.divider()
 
-            # ---------------- PDF SLIP ----------------
-            st.subheader("📄 Assembly Slip")
+            # ---------------- SLIP DOWNLOAD ----------------
+            st.markdown("### 📄 Assembly Slip")
 
-            slip = generate_assembly_slip(o, assembled_qty, assign_to, notes)
+            slip = generate_slip(o, assembled_qty, assign_to, material, notes)
 
             st.download_button(
-                "📥 Download Assembly Slip (PDF)",
+                "📥 Download Slip (PDF)",
                 data=slip,
                 file_name=f"{order_id}_assembly_slip.pdf",
                 mime="application/pdf",
@@ -273,7 +308,7 @@ with tab1:
             st.divider()
 
             # ---------------- MOVE TO NEXT STAGE ----------------
-            if file_assembly and end:
+            if file_asm and end:
                 if st.button("🚀 Move to Packing", key=f"next_{order_id}", type="primary", use_container_width=True):
                     update(f"orders/{key}", {
                         "stage": "Packing",
@@ -283,26 +318,23 @@ with tab1:
                     st.success("Moved to Packing!")
                     st.rerun()
             else:
-                st.warning("⚠ Complete time & upload file to proceed.")
+                st.warning("⚠ Complete all steps (time + file) to continue.")
 
 
 # -----------------------------------------
-# TAB: COMPLETED
+# COMPLETED TAB
 # -----------------------------------------
 with tab2:
-
     if not completed:
-        st.info("No completed Assembly jobs.")
+        st.info("No completed Assembly work")
 
     for key, o in completed.items():
-
-        st.write(f"### {o['order_id']} — {o['customer']}")
-        st.caption(f"Item: {o.get('item')} — Qty: {o.get('qty')}")
+        st.subheader(f"{o['order_id']} — {o['customer']}")
         st.caption(f"Completed At: {o.get('assembly_completed_at')}")
 
-        file_assembly = o.get("assembly_file")
-        if file_assembly:
-            preview("Assembly File", file_assembly)
-            download_button_ui("⬇ Download File", file_assembly, o["order_id"], "assembly")
+        file_asm = o.get("assembly_file")
+        if file_asm:
+            preview("Assembly File", file_asm)
+            download_button_ui("⬇ Download Assembly File", file_asm, o['order_id'], "assembly")
 
         st.divider()
