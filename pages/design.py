@@ -2,16 +2,16 @@ import streamlit as st
 from firebase import read, update
 import base64
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 
-# ===========================================================
+# ---------------------------------------------------------
 # PAGE CONFIG
-# ===========================================================
+# ---------------------------------------------------------
 st.set_page_config(page_title="Design Department", layout="wide", page_icon="🎨")
 
-# ===========================================================
+# ---------------------------------------------------------
 # ROLE CHECK
-# ===========================================================
+# ---------------------------------------------------------
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
@@ -20,55 +20,58 @@ if st.session_state["role"] not in ["design", "admin"]:
     st.stop()
 
 st.title("🎨 Design Department Dashboard")
-st.caption("Manage artwork, upload files, track time, and transition orders to the next stage.")
+st.caption("Manage artwork, uploads, notes, and track time efficiently.")
 
-# ===========================================================
-# LOAD ORDERS
-# ===========================================================
+# ---------------------------------------------------------
+# LOAD DATA
+# ---------------------------------------------------------
 orders = read("orders") or {}
 
 pending_orders = {}
 completed_orders = {}
 
+# Updated logic:
 for key, o in orders.items():
     if not isinstance(o, dict):
         continue
+
     if o.get("stage") == "Design":
         pending_orders[key] = o
-    elif o.get("design_completed_at"):
+    else:
         completed_orders[key] = o
 
-# ===========================================================
-# FILE HELPERS
-# ===========================================================
-def encode_file(file: Optional[Any]) -> Optional[str]:
-    if file:
-        file.seek(0)
-        return base64.b64encode(file.read()).decode("utf-8")
+
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+def encode_file(uploaded):
+    if uploaded:
+        uploaded.seek(0)
+        return base64.b64encode(uploaded.read()).decode("utf-8")
     return None
 
-def preview_file(file_data: Optional[str], label: str):
-    if not file_data:
+
+def preview_file(b64_data: Optional[str], label: str):
+    """Show preview for image / PDF."""
+    if not b64_data:
         return
 
-    decoded = base64.b64decode(file_data)
-    st.markdown(f"### 📄 {label} Preview")
-
-    # Try Image
     try:
-        st.image(decoded, use_column_width=True)
-        return
+        decoded = base64.b64decode(b64_data)
+
+        # Try image preview
+        st.image(decoded, caption=f"{label} Preview", use_container_width=True)
     except:
         pass
 
-    # Try PDF
+    # PDF preview
     try:
-        st.pdf(decoded)
-        return
+        b64_pdf = b64_data
+        pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="400px"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
     except:
         pass
 
-    st.info("Preview not supported for this file type.")
 
 def download_button_ui(file_data: Optional[str], filename: str, label: str, key: str):
     if not file_data:
@@ -78,10 +81,11 @@ def download_button_ui(file_data: Optional[str], filename: str, label: str, key:
         label=label,
         data=decoded,
         file_name=filename,
-        key=key,
         mime="application/octet-stream",
-        use_container_width=True
+        use_container_width=True,
+        key=key,
     )
+
 
 def calculate_time_diff(start, end):
     if start and end:
@@ -91,283 +95,202 @@ def calculate_time_diff(start, end):
             diff = t2 - t1
             return f"Total: **{str(diff).split('.')[0]}**"
         except:
-            return "Error"
-    elif start:
-        return "⏳ Running…"
+            return "Time error."
+    elif start and not end:
+        return "⏳ Running..."
     return "Not Started"
 
-# ===========================================================
-# TABS
-# ===========================================================
+
+# ---------------------------------------------------------
+# FILE CARD COMPONENT
+# ---------------------------------------------------------
+def file_card(col, order_id, key_name, label, allowed, order_key):
+    with col:
+        design_files = orders[order_key].get("design_files", {})
+        file_data = design_files.get(key_name)
+
+        status = "✔️" if file_data else "➕"
+        st.markdown(f"**{status} {label}**")
+
+        upload = st.file_uploader(
+            f"Upload {label}",
+            type=allowed,
+            key=f"file_{key_name}_{order_id}",
+            label_visibility="collapsed"
+        )
+
+        if st.button(f"💾 Save {label}", key=f"save_{key_name}_{order_id}", disabled=not upload):
+            encoded = encode_file(upload)
+            df = orders[order_key].get("design_files", {})
+            df[key_name] = encoded
+            update(f"orders/{order_key}", {"design_files": df})
+            st.toast(f"{label} Saved")
+            st.rerun()
+
+        if file_data:
+            preview_file(file_data, label)
+
+        download_button_ui(
+            file_data,
+            f"{order_id}_{key_name}.file",
+            "⬇️ Download",
+            f"dl_{key_name}_{order_id}"
+        )
+
+
+# ---------------------------------------------------------
+# MAIN TABS
+# ---------------------------------------------------------
 tab_pending, tab_completed = st.tabs([
-    f"🛠️ Pending Workload ({len(pending_orders)})",
+    f"🛠️ Pending Work ({len(pending_orders)})",
     f"✅ Completed Designs ({len(completed_orders)})"
 ])
 
-# ===========================================================
-# TAB: PENDING WORK
-# ===========================================================
+
+# =========================================================
+# TAB 1 — PENDING
+# =========================================================
 with tab_pending:
-    st.header("🛠️ Orders Awaiting Design")
+    st.header("🛠️ Work in Progress")
 
     if not pending_orders:
-        st.info("No pending orders.")
-        st.stop()
+        st.success("No pending work 🎉 All caught up!")
 
-    sorted_pending = sorted(
-        pending_orders.items(),
-        key=lambda i: (
-            {"High": 0, "Medium": 1, "Low": 2}.get(i[1].get("priority", "Medium")),
-            i[1].get("received", "9999-12-31")
-        )
-    )
-
-    for key, order in sorted_pending:
-
+    for key, order in pending_orders.items():
         order_id = order.get("order_id")
-        customer = order.get("customer")
-        item = order.get("item")
 
         with st.container(border=True):
+            st.markdown(f"### **{order_id}** — {order.get('customer')}")
+            st.markdown(f"**Item:** {order.get('item')}")
 
-            st.markdown(f"## {order_id} — {customer}")
-            st.caption(f"**Item:** {item}")
-
-            colA, colB, colC, colD = st.columns(4)
-            colA.metric("Priority", order.get("priority"))
-            colB.metric("Product", order.get("product_type"))
-            colC.metric("Qty", order.get("qty"))
-            colD.metric("Due", order.get("due"))
-
-            st.markdown(
-                f"📐 Foil=`{order.get('foil_id','-')}` | SpotUV=`{order.get('spotuv_id','-')}` | Size=`{order.get('size_id','-')}`"
-            )
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Priority", order.get("priority"))
+            c2.metric("Qty", order.get("qty"))
+            c3.metric("Product", order.get("product_type"))
+            c4.metric("Due", order.get("due"))
 
             st.divider()
 
-            col_time, col_files, col_notes = st.columns([1.5, 3, 2.5])
+            # --- Columns for Time / Files / Notes ---
+            tcol, fcol, ncol = st.columns([1.2, 3, 2])
 
-            # =======================================================================
-            # TIME TRACKING
-            # =======================================================================
-            with col_time:
+            # 1) TIME
+            with tcol:
                 st.subheader("⏱️ Time")
-
                 start = order.get("design_start_time")
                 end = order.get("design_end_time")
 
                 if not start:
-                    if st.button("▶️ Start", key=f"start_{order_id}", use_container_width=True):
+                    if st.button("▶️ Start", key=f"start_{order_id}"):
                         update(f"orders/{key}", {"design_start_time": datetime.now().isoformat()})
                         st.rerun()
                     st.caption("Waiting to start")
-
                 elif not end:
-                    if st.button("⏹️ End", key=f"end_{order_id}", use_container_width=True):
+                    if st.button("⏹️ Stop", key=f"stop_{order_id}"):
                         update(f"orders/{key}", {"design_end_time": datetime.now().isoformat()})
                         st.rerun()
-                    st.caption(f"Started at {start.split('T')[1][:5]}")
-
+                    st.caption(f"Started at: {start.split('T')[1][:5]}")
                 else:
                     st.success("Completed")
                     st.caption(calculate_time_diff(start, end))
 
-            # =======================================================================
-            # FILES SECTION
-            # =======================================================================
-            design_files = order.get("design_files", {})
-
-            with col_files:
+            # 2) FILE UPLOADS
+            with fcol:
                 st.subheader("📁 Files")
 
-                col_f1, col_f2, col_f3 = st.columns(3)
+                colF1, colF2, colF3 = st.columns(3)
 
-                def file_card(container, file_key, label, allowed, required=False):
-                    with container:
-                        exists = design_files.get(file_key)
-                        icon = "✔️" if exists else ("⚠️" if required else "➖")
-                        st.markdown(f"**{icon} {label}**")
+                file_card(colF1, order_id, "reference", "Reference", ["png", "jpg", "pdf"], key)
+                file_card(colF2, order_id, "template", "Template", ["pdf", "ai", "zip"], key)
+                file_card(colF3, order_id, "final", "Final Art", ["pdf", "ai", "zip"], key)
 
-                        upload = st.file_uploader(
-                            f"Upload {label}",
-                            type=allowed,
-                            key=f"up_{file_key}_{order_id}",
-                            label_visibility="collapsed"
-                        )
-
-                        if st.button(f"💾 Save {label}", key=f"save_{file_key}_{order_id}", disabled=not upload, use_container_width=True):
-                            encoded = encode_file(upload)
-                            new_files = orders[key].get("design_files", {})
-                            new_files[file_key] = encoded
-                            update(f"orders/{key}", {"design_files": new_files})
-                            st.toast(f"{label} Saved!")
-                            st.rerun()
-
-                        # PREVIEW (ADDED)
-                        if exists:
-                            preview_file(exists, label)
-
-                        # DOWNLOAD
-                        download_button_ui(
-                            exists, f"{order_id}_{file_key}.file",
-                            f"⬇️ Download {label}",
-                            key=f"dl_{file_key}_{order_id}"
-                        )
-
-                file_card(col_f1, "reference", "Reference", ["png", "jpg", "jpeg", "pdf", "zip"])
-                file_card(col_f2, "template", "Template", ["ai", "eps", "pdf", "zip"])
-                file_card(col_f3, "final", "Final Art", ["ai", "eps", "pdf", "zip"], required=True)
-
-            # =======================================================================
-            # NOTES + COMPLETE
-            # =======================================================================
-            with col_notes:
+            # 3) NOTES + COMPLETE
+            with ncol:
                 st.subheader("📝 Notes")
 
-                notes = st.text_area(
-                    "Designer Notes",
-                    value=order.get("design_notes", ""),
-                    height=80,
-                    key=f"notes_{order_id}",
-                    label_visibility="collapsed"
-                )
+                notes = st.text_area("Designer Notes", value=order.get("design_notes", ""), key=f"notes_{order_id}")
 
-                if st.button("💾 Save Notes", key=f"save_notes_{order_id}", use_container_width=True):
+                if st.button("💾 Save Notes", key=f"save_notes_{order_id}"):
                     update(f"orders/{key}", {"design_notes": notes})
-                    st.toast("Notes Updated!")
+                    st.toast("Notes updated")
                     st.rerun()
 
                 st.markdown("---")
 
+                # Complete order
+                final_ready = orders[key].get("design_files", {}).get("final") is not None
                 next_stage = order.get("next_after_printing", "Assembly")
-                is_ready = design_files.get("final")
 
-                if is_ready:
-                    if st.button(
-                        f"🚀 Move to {next_stage}",
-                        key=f"complete_{order_id}",
-                        type="primary",
-                        use_container_width=True
-                    ):
+                if final_ready:
+                    if st.button(f"🚀 Move to {next_stage}", key=f"complete_{order_id}", type="primary"):
                         now = datetime.now().isoformat()
+                        start = order.get("design_start_time")
+                        end = order.get("design_end_time")
 
-                        start_time = order.get("design_start_time")
-                        end_time = order.get("design_end_time")
-
-                        # AUTO END TIME FIX
-                        if start_time and not end_time:
-                            end_time = now
+                        # auto-end time
+                        if start and not end:
+                            end = now
 
                         update(f"orders/{key}", {
                             "stage": next_stage,
                             "design_completed_at": now,
-                            "design_end_time": end_time or now
+                            "design_end_time": end or now
                         })
 
                         st.balloons()
-                        st.toast("Order moved and time auto-completed!")
+                        st.toast("Design Completed!")
                         st.rerun()
                 else:
-                    st.warning("Upload Final Art to complete.")
+                    st.warning("Final art required to complete order.")
 
             st.markdown("---")
 
-# ===========================================================
-# TAB: COMPLETED DESIGNS
-# ===========================================================
+
+# =========================================================
+# TAB 2 — COMPLETED
+# =========================================================
 with tab_completed:
     st.header("✅ Completed Designs")
 
     if not completed_orders:
         st.info("No completed designs yet.")
-        st.stop()
 
-    sorted_completed = sorted(
-        completed_orders.items(),
-        key=lambda i: i[1].get("design_completed_at", "0000-01-01"),
-        reverse=True
-    )
-
-    for key, order in sorted_completed:
-
+    for key, order in completed_orders.items():
         order_id = order.get("order_id")
-        customer = order.get("customer")
-        item = order.get("item")
-        design_files = order.get("design_files", {})
-        start = order.get("design_start_time")
-        end = order.get("design_end_time")
 
-        with st.expander(f"{order_id} — {customer} | {item}"):
+        with st.container(border=True):
 
-            st.subheader("📌 Summary")
+            c1, c2, c3 = st.columns([2, 3, 2])
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Customer", customer)
-            c2.metric("Product", order.get("product_type"))
-            c3.metric("Qty", order.get("qty"))
+            with c1:
+                st.subheader(order_id)
+                st.write(order.get("customer"))
+                st.caption(f"Completed: {order.get('design_completed_at', '-')[:10]}")
 
-            c4, c5 = st.columns(2)
-            c4.metric("Completed On", order.get("design_completed_at", "").split("T")[0])
-            c5.markdown(calculate_time_diff(start, end))
+            with c2:
+                st.write(f"**Item:** {order.get('item')}")
+                st.write(f"**Notes:** {order.get('design_notes', '-')}")
+                st.write(calculate_time_diff(order.get("design_start_time"), order.get("design_end_time")))
 
-            st.divider()
+            with c3:
+                st.subheader("📁 Files")
+                df = order.get("design_files", {})
 
-            # =====================================================
-            # FILES WITH PREVIEW
-            # =====================================================
-            st.subheader("📁 Uploaded Files")
+                for key_name, label in {
+                    "reference": "Reference",
+                    "template": "Template",
+                    "final": "Final"
+                }.items():
 
-            col_f1, col_f2, col_f3 = st.columns(3)
+                    if df.get(key_name):
+                        st.markdown(f"**{label}**")
+                        preview_file(df[key_name], label)
 
-            def show_file(container, file_key, label):
-                with container:
-                    fdata = design_files.get(file_key)
-                    if not fdata:
-                        st.warning(f"No {label} Uploaded")
-                        return
+                        download_button_ui(
+                            df[key_name],
+                            f"{order_id}_{key_name}.file",
+                            "⬇️ Download",
+                            f"dl_comp_{key_name}_{order_id}"
+                        )
 
-                    st.success(f"{label} Available ✔")
-                    preview_file(fdata, label)
-                    download_button_ui(
-                        fdata,
-                        f"{order_id}_{file_key}",
-                        f"⬇️ Download {label}",
-                        key=f"dlc_{file_key}_{order_id}"
-                    )
-
-            show_file(col_f1, "reference", "Reference")
-            show_file(col_f2, "template", "Template")
-            show_file(col_f3, "final", "Final Art")
-
-            st.divider()
-
-            # =====================================================
-            # NOTES
-            # =====================================================
-            st.subheader("📝 Notes & Instructions")
-
-            c1, c2 = st.columns(2)
-            c1.markdown("### Designer Notes")
-            c1.info(order.get("design_notes", "No notes"))
-
-            c2.markdown("### Admin Instructions")
-            c2.success(order.get("admin_instructions", "No instructions"))
-
-            st.divider()
-
-            # =====================================================
-            # PREVIOUS ORDER THINKING
-            # =====================================================
-            st.subheader("🧠 Previous Order Used (Auto-Think)")
-
-            prev = order.get("previous_order_used_for_repeat")
-            if prev:
-                st.success(f"Repeat of: **{prev.get('order_id')}** — {prev.get('item')}")
-                st.json({
-                    "Foil": prev.get("foil_id"),
-                    "SpotUV": prev.get("spotuv_id"),
-                    "Size": prev.get("size_id"),
-                    "Brand Thickness": prev.get("brand_thickness_id"),
-                })
-            else:
-                st.info("This order did not use previous reference.")
+            st.markdown("---")
