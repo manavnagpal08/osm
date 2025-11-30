@@ -95,32 +95,38 @@ def preview(label, b64):
 # PURE PYTHON PDF SLIP GENERATOR
 # ---------------------------------------------------
 def generate_lamination_slip(order, lam_type, material, reel, assign_to, notes):
-    # Clean multi-line text inside PDF safely
-    def pdf_escape(text):
-        return text.replace("(", "\\(").replace(")", "\\)")
 
-    content = f"""
-LAMINATION DEPARTMENT – JOB SLIP
+    # Build final text with multiple lines
+    lines = [
+        "LAMINATION DEPARTMENT – JOB SLIP",
+        "",
+        f"Order ID: {order.get('order_id')}",
+        f"Customer: {order.get('customer')}",
+        f"Item: {order.get('item')}",
+        "",
+        f"Lamination Type: {lam_type}",
+        f"Material Quality: {material}",
+        f"Reel Width: {reel} inches",
+        f"Assigned To: {assign_to}",
+        "",
+        "Notes:",
+        notes or "-",
+        "",
+        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    ]
 
-Order ID: {order.get('order_id')}
-Customer: {order.get('customer')}
-Item: {order.get('item')}
+    # Escape PDF special characters
+    def esc(s):
+        return s.replace("(", "\\(").replace(")", "\\)")
 
-Lamination Type: {lam_type}
-Material Quality: {material}
-Reel Width: {reel} inches
-Assigned To: {assign_to}
+    # Build PDF text block with each line
+    pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
+    for line in lines:
+        pdf_text += f"({esc(line)}) Tj\n0 -18 Td\n"
+    pdf_text += "ET"
 
-Notes:
-{notes or '-'}
-
-Generated At: {datetime.now().strftime("%Y-%m-%d %H:%M")}
-"""
-
-    # Escape PDF characters
-    safe = pdf_escape(content)
-
-    pdf_bytes = f"""%PDF-1.4
+    # Assemble the PDF structure
+    pdf = f"""%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
@@ -130,20 +136,14 @@ endobj
 3 0 obj
 << /Type /Page /Parent 2 0 R
 /MediaBox [0 0 612 792]
+/Resources << /Font << /F1 5 0 R >> >>
 /Contents 4 0 R
-/Resources <<
-  /Font << /F1 5 0 R >>
->>
 >>
 endobj
 4 0 obj
-<< /Length {len(safe) + 200} >>
+<< /Length {len(pdf_text)} >>
 stream
-BT
-/F1 12 Tf
-50 750 Td
-({safe}) Tj
-ET
+{pdf_text}
 endstream
 endobj
 5 0 obj
@@ -154,20 +154,21 @@ endobj
 endobj
 xref
 0 6
-0000000000 65535 f
-0000000010 00000 n
-0000000079 00000 n
-0000000178 00000 n
-0000000379 00000 n
-0000000565 00000 n
+0000000000 65535 f 
+0000000010 00000 n 
+0000000075 00000 n 
+0000000144 00000 n 
+0000000334 00000 n 
+0000000580 00000 n 
 trailer
 << /Root 1 0 R /Size 6 >>
 startxref
-640
+700
 %%EOF
 """
 
-    return pdf_bytes.encode("utf-8", errors="ignore")
+    return pdf.encode("utf-8", errors="ignore")
+
 
 
 # ---------------------------------------------------
