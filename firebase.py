@@ -1,27 +1,24 @@
 import requests
-import json
 
 BASE_URL = "https://omss-2ccc6-default-rtdb.firebaseio.com/"
 
 def read(path):
     url = f"{BASE_URL}{path}.json"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
+    res = requests.get(url)
+    if res.status_code == 200:
+        return res.json()
     return None
 
 def push(path, data):
     url = f"{BASE_URL}{path}.json"
-    response = requests.post(url, json=data)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Firebase Push Failed: {response.text}")
+    res = requests.post(url, json=data)
+    if res.status_code == 200:
+        return res.json()
+    raise Exception(f"Push failed: {res.text}")
 
 def update(path, data):
     url = f"{BASE_URL}{path}.json"
-    response = requests.patch(url, json=data)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Firebase Update Failed: {response.text}")
+    res = requests.patch(url, json=data)
+    if res.status_code == 200:
+        return res.json()
+    raise Exception(f"Update failed: {res.text}")
