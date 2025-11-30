@@ -95,7 +95,11 @@ def preview(label, b64):
 # PURE PYTHON PDF SLIP GENERATOR
 # ---------------------------------------------------
 def generate_lamination_slip(order, lam_type, material, reel, assign_to, notes):
-    text = f"""
+    # Clean multi-line text inside PDF safely
+    def pdf_escape(text):
+        return text.replace("(", "\\(").replace(")", "\\)")
+
+    content = f"""
 LAMINATION DEPARTMENT – JOB SLIP
 
 Order ID: {order.get('order_id')}
@@ -112,8 +116,11 @@ Notes:
 
 Generated At: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 """
-    # Simple PDF generator (text only)
-    pdf = f"""%PDF-1.4
+
+    # Escape PDF characters
+    safe = pdf_escape(content)
+
+    pdf_bytes = f"""%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
@@ -121,34 +128,47 @@ endobj
 << /Type /Pages /Kids [3 0 R] /Count 1 >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
-/Contents 4 0 R /Resources << >>
+<< /Type /Page /Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+/Resources <<
+  /Font << /F1 5 0 R >>
+>>
 >>
 endobj
 4 0 obj
-<< /Length {len(text) + 200} >>
+<< /Length {len(safe) + 200} >>
 stream
 BT
 /F1 12 Tf
 50 750 Td
-{text.replace("\n", " T* ")}
+({safe}) Tj
 ET
 endstream
 endobj
+5 0 obj
+<< /Type /Font
+   /Subtype /Type1
+   /BaseFont /Courier
+>>
+endobj
 xref
-0 5
-0000000000 65535 f 
-0000000010 00000 n 
-0000000079 00000 n 
-0000000178 00000 n 
-0000000349 00000 n 
+0 6
+0000000000 65535 f
+0000000010 00000 n
+0000000079 00000 n
+0000000178 00000 n
+0000000379 00000 n
+0000000565 00000 n
 trailer
-<< /Root 1 0 R /Size 5 >>
+<< /Root 1 0 R /Size 6 >>
 startxref
-500
+640
 %%EOF
 """
-    return pdf.encode("latin-1")
+
+    return pdf_bytes.encode("utf-8", errors="ignore")
+
 
 # ---------------------------------------------------
 # TABS
