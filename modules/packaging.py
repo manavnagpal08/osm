@@ -186,18 +186,35 @@ def parse_datetime_robust(date_str: str) -> Optional[datetime]:
     return dt
 
 def calculate_time_diff(start: Optional[str], end: Optional[str]) -> str:
-    """Calculate how long the task took using robust parsing."""
+    """
+    FIXED VERSION:
+    - If end timestamp exists but start is missing → show 0:00:00 (completed).
+    - If both exist → show real duration.
+    - If only start exists → Running…
+    - If neither exists → Not Started.
+    """
     t1 = parse_datetime_robust(start)
     t2 = parse_datetime_robust(end)
+
+    # End exists, start missing → Completed with zero duration
+    if t2 and not t1:
+        return "Total Time: **0:00:00**"
+
+    # Normal case: start and end both exist
     if t1 and t2:
         try:
             diff = t2 - t1
             return f"Total Time: **{str(diff).split('.')[0]}**"
         except:
             return "Time Calculation Error"
-    elif t1:
+
+    # Running task
+    if t1:
         return "⏳ Running…"
+
+    # Not started at all
     return "Not Started"
+
 
 def detect_file_type(data: Optional[str]):
     """Detects file type from base64 data."""
@@ -481,6 +498,7 @@ with tab1:
                         now = datetime.now(timezone.utc).isoformat()
                         update(f"orders/{key}", {
                             "stage": "Storage",
+                            "packing_end": now, 
                             "packing_completed_at": now 
                         })
                         st.success("✅ Order moved to Storage queue!")
@@ -715,6 +733,7 @@ with tab3:
                         update(f"orders/{key}", {
                             "stage": "Completed",
                             "completed_at": now, 
+                            "dispatch_end": o.get("dispatch_end") or now,   # FIX ADDED
                             "dispatch_completed_at": now,
                             "dispatch_completed_by": USER_IDENTITY
                         })
