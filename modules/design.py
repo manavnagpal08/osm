@@ -32,17 +32,16 @@ st.caption("Manage artwork, files, notes, and track design time efficiently.")
 # ---------------------------------------------
 orders = read("orders") or {}
 
-pending_orders = {}
+all_pending_orders = {}
 completed_orders = {}
+priority_options = ["All", "High", "Medium", "Low"] # Define filter options
 
 for key, o in orders.items():
     if not isinstance(o, dict):
         continue
 
-    # Load orders in Design stage as pending
     if o.get("stage") == "Design":
-        pending_orders[key] = o
-    # Load any order that has a design_completed_at timestamp as completed
+        all_pending_orders[key] = o
     elif o.get("design_completed_at"):
         completed_orders[key] = o
 
@@ -57,7 +56,7 @@ def now_ist_raw():
     return datetime.now(IST).isoformat()
 
 def now_ist_formatted():
-    """Returns human-readable format: 01 Dec 2024, 2:22 PM"""
+    """Returns human-readable format: 01 Dec 2025, 4:20 PM"""
     return datetime.now(IST).strftime("%d %b %Y, %I:%M %p")
 
 
@@ -93,8 +92,8 @@ def preview_file(b64_data: Optional[str], label: str):
             <iframe 
                 src="data:application/pdf;base64,{b64_data}"
                 width="100%"
-                height="800px"
-                style="border:2px solid #0C7A35;border-radius:12px;margin-top:8px;">
+                height="400px" 
+                style="border:2px solid #0C7A35;border-radius:8px;margin-top:8px;">
             </iframe>
             """,
             unsafe_allow_html=True
@@ -158,7 +157,8 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
                 border-radius:6px;
                 margin-bottom:8px;
                 color:white;
-                font-weight:600;">
+                font-weight:600;
+                text-align:center;">
                 📁 {label}
             </div>
             """,
@@ -166,7 +166,6 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
         )
 
         # File uploader
-        # NOTE: Using unique firebase_key for uploader/save/download keys
         upload = st.file_uploader(
             f"Upload {label}",
             type=allowed,
@@ -178,7 +177,8 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
         if st.button(
             f"💾 Save {label}",
             key=f"save_{file_key}_{firebase_key}", 
-            disabled=not upload
+            disabled=not upload,
+            use_container_width=True
         ):
             upload.seek(0)
 
@@ -210,12 +210,55 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
                 f"dl_{file_key}_{firebase_key}" 
             )
 
+# ========================================================
+# FILTER AND SEARCH LOGIC
+# ========================================================
+
+# 1. Sidebar for filter/search
+with st.sidebar:
+    st.header("🔍 Filter Orders")
+
+    # Search
+    search_query = st.text_input(
+        "Search by Order ID or Customer Name", 
+        key="search_pending"
+    ).lower()
+
+    # Priority Filter
+    priority_filter = st.selectbox(
+        "Filter by Priority",
+        options=priority_options,
+        index=0,
+        key="priority_filter"
+    )
+
+# 2. Apply filters to pending orders
+filtered_pending_orders = {}
+
+for key, order in all_pending_orders.items():
+    
+    # Priority Filter Check
+    priority_match = (priority_filter == "All" or 
+                      order.get("priority") == priority_filter)
+    
+    # Search Filter Check
+    search_match = True
+    if search_query:
+        order_id = order.get("order_id", "").lower()
+        customer = order.get("customer", "").lower()
+        
+        if search_query not in order_id and search_query not in customer:
+            search_match = False
+            
+    if priority_match and search_match:
+        filtered_pending_orders[key] = order
+
 # ================================
 # SECTION 2 — PENDING DESIGNS
 # ================================
 
 tab_pending, tab_completed = st.tabs([
-    f"🛠️ Pending Designs ({len(pending_orders)})",
+    f"🛠️ Pending Designs ({len(filtered_pending_orders)})",
     f"✅ Completed Designs ({len(completed_orders)})"
 ])
 
@@ -224,11 +267,11 @@ with tab_pending:
 
     st.header("🛠️ Design Work In Progress")
 
-    if not pending_orders:
-        st.success("No pending work 🎉")
+    if not filtered_pending_orders:
+        st.info("No pending work matching your filters 🎉")
 
-    # Loop orders
-    for firebase_key, order in pending_orders.items():
+    # Loop filtered orders
+    for firebase_key, order in filtered_pending_orders.items():
 
         order_id = order.get("order_id")
         customer = order.get("customer")
@@ -271,8 +314,7 @@ with tab_pending:
 
                 # START BUTTON
                 if not start_raw:
-                    # FIX: Using unique firebase_key
-                    if st.button("▶️ Start", key=f"start_{firebase_key}"): 
+                    if st.button("▶️ Start", key=f"start_{firebase_key}", use_container_width=True, type="primary"): 
                         update(f"orders/{firebase_key}", {
                             "design_start_time_raw": now_ist_raw(),
                             "design_start_time": now_ist_formatted()
@@ -282,8 +324,7 @@ with tab_pending:
 
                 # STOP BUTTON
                 elif not end_raw:
-                    # FIX: Using unique firebase_key
-                    if st.button("⏹️ Stop", key=f"stop_{firebase_key}"):
+                    if st.button("⏹️ Stop", key=f"stop_{firebase_key}", use_container_width=True, type="secondary"):
                         update(f"orders/{firebase_key}", {
                             "design_end_time_raw": now_ist_raw(),
                             "design_end_time": now_ist_formatted()
@@ -319,12 +360,11 @@ with tab_pending:
                 notes = st.text_area(
                     "Designer Notes",
                     value=order.get("design_notes", ""),
-                    # FIX: Using unique firebase_key
-                    key=f"notes_{firebase_key}"
+                    key=f"notes_{firebase_key}",
+                    height=100
                 )
 
-                # FIX: Using unique firebase_key
-                if st.button("💾 Save Notes", key=f"save_notes_{firebase_key}"):
+                if st.button("💾 Save Notes", key=f"save_notes_{firebase_key}", use_container_width=True):
                     update(f"orders/{firebase_key}", {"design_notes": notes})
                     st.toast("Notes saved successfully!", icon="💾")
                     st.rerun()
@@ -335,8 +375,7 @@ with tab_pending:
                 final_art_exists = order.get("design_files", {}).get("final")
 
                 if final_art_exists:
-                    # FIX: Using unique firebase_key
-                    if st.button("🚀 Move to PRINTING", type="primary", key=f"complete_{firebase_key}"):
+                    if st.button("🚀 Move to PRINTING", type="primary", key=f"complete_{firebase_key}", use_container_width=True):
 
                         end_raw_final = order.get("design_end_time_raw") or now_ist_raw()
                         end_fmt_final = order.get("design_end_time") or now_ist_formatted()
@@ -440,17 +479,14 @@ with tab_completed:
                     "final": "Final Art"
                 }.items():
 
-                    # Get the entire file entry dictionary
                     file_entry = df.get(fk)
 
                     if file_entry:
-                        # Extract the base64 data and extension
                         file_b64 = file_entry.get("data")
-                        # Default to 'file' if ext is missing, though it should be present
                         file_ext = file_entry.get("ext", "file") 
                         
                         if not file_b64:
-                            continue # Skip if data is missing
+                            continue 
 
                         # Label header
                         st.markdown(
@@ -473,12 +509,11 @@ with tab_completed:
                         preview_file(file_b64, label)
 
                         # Download button
-                        # FIX: Use the correct file_ext to form the filename
                         download_button_ui(
                             file_b64,
                             f"{order_id}_{fk}.{file_ext}", 
                             f"⬇️ Download {label}",
-                            f"dl_c_{fk}_{firebase_key}" # Using unique firebase_key
+                            f"dl_c_{fk}_{firebase_key}"
                         )
 
             st.markdown("---")
