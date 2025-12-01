@@ -135,7 +135,6 @@ def download_button_ui(b64_data, filename, label, key):
     )
 
 
-
 # ========================================================
 # FILE CARD — BEAUTIFUL GREEN UI
 # ========================================================
@@ -167,21 +166,18 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
         )
 
         # File uploader
-        # The key uses order_id which is okay if order_id is truly unique, but
-        # firebase_key is safer. Since the error was outside this function, 
-        # we stick to the original logic here to minimize changes, but noted below 
-        # that firebase_key is the unique ID passed to the function.
+        # NOTE: Using unique firebase_key for uploader/save/download keys
         upload = st.file_uploader(
             f"Upload {label}",
             type=allowed,
             label_visibility="collapsed",
-            key=f"up_{file_key}_{firebase_key}" # Using firebase_key
+            key=f"up_{file_key}_{firebase_key}" 
         )
 
         # Save the uploaded file
         if st.button(
             f"💾 Save {label}",
-            key=f"save_{file_key}_{firebase_key}", # Using firebase_key
+            key=f"save_{file_key}_{firebase_key}", 
             disabled=not upload
         ):
             upload.seek(0)
@@ -211,7 +207,7 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
                 file_b64,
                 filename,
                 f"⬇️ Download {label}",
-                f"dl_{file_key}_{firebase_key}" # Using firebase_key
+                f"dl_{file_key}_{firebase_key}" 
             )
 
 # ================================
@@ -275,7 +271,7 @@ with tab_pending:
 
                 # START BUTTON
                 if not start_raw:
-                    # FIXED: Using unique firebase_key
+                    # FIX: Using unique firebase_key
                     if st.button("▶️ Start", key=f"start_{firebase_key}"): 
                         update(f"orders/{firebase_key}", {
                             "design_start_time_raw": now_ist_raw(),
@@ -286,7 +282,7 @@ with tab_pending:
 
                 # STOP BUTTON
                 elif not end_raw:
-                    # FIXED: Using unique firebase_key
+                    # FIX: Using unique firebase_key
                     if st.button("⏹️ Stop", key=f"stop_{firebase_key}"):
                         update(f"orders/{firebase_key}", {
                             "design_end_time_raw": now_ist_raw(),
@@ -308,7 +304,6 @@ with tab_pending:
                 st.subheader("📁 Files")
                 f1, f2, f3 = st.columns(3)
 
-                # The file_card function will handle key uniqueness internally using the passed firebase_key
                 file_card(f1, order_id, "reference", "Reference", ["png", "jpg", "pdf"], firebase_key)
                 file_card(f2, order_id, "template", "Template", ["pdf", "ai", "zip"], firebase_key)
                 file_card(f3, order_id, "final", "Final Art", ["pdf", "ai", "zip"], firebase_key)
@@ -324,11 +319,11 @@ with tab_pending:
                 notes = st.text_area(
                     "Designer Notes",
                     value=order.get("design_notes", ""),
-                    # FIXED: Using unique firebase_key
+                    # FIX: Using unique firebase_key
                     key=f"notes_{firebase_key}"
                 )
 
-                # FIXED: Using unique firebase_key
+                # FIX: Using unique firebase_key
                 if st.button("💾 Save Notes", key=f"save_notes_{firebase_key}"):
                     update(f"orders/{firebase_key}", {"design_notes": notes})
                     st.toast("Notes saved successfully!", icon="💾")
@@ -340,7 +335,7 @@ with tab_pending:
                 final_art_exists = order.get("design_files", {}).get("final")
 
                 if final_art_exists:
-                    # FIXED: Using unique firebase_key
+                    # FIX: Using unique firebase_key
                     if st.button("🚀 Move to PRINTING", type="primary", key=f"complete_{firebase_key}"):
 
                         end_raw_final = order.get("design_end_time_raw") or now_ist_raw()
@@ -445,10 +440,18 @@ with tab_completed:
                     "final": "Final Art"
                 }.items():
 
+                    # Get the entire file entry dictionary
                     file_entry = df.get(fk)
 
-                    if file_entry and file_entry.get("data"):
+                    if file_entry:
+                        # Extract the base64 data and extension
                         file_b64 = file_entry.get("data")
+                        # Default to 'file' if ext is missing, though it should be present
+                        file_ext = file_entry.get("ext", "file") 
+                        
+                        if not file_b64:
+                            continue # Skip if data is missing
+
                         # Label header
                         st.markdown(
                             f"""
@@ -470,12 +473,12 @@ with tab_completed:
                         preview_file(file_b64, label)
 
                         # Download button
-                        # FIXED: Using unique firebase_key for the download button
+                        # FIX: Use the correct file_ext to form the filename
                         download_button_ui(
                             file_b64,
-                            f"{order_id}_{fk}.file",
+                            f"{order_id}_{fk}.{file_ext}", 
                             f"⬇️ Download {label}",
-                            f"dl_c_{fk}_{firebase_key}" 
+                            f"dl_c_{fk}_{firebase_key}" # Using unique firebase_key
                         )
 
             st.markdown("---")
