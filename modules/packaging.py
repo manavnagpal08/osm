@@ -23,10 +23,10 @@ USER = st.session_state["username"]
 def load_orders():
     orders = read("orders") or {}
 
-    incoming = {}      # from assembly (stage = Assembly)
-    storage = {}       # stage = Storage
-    dispatch = {}      # stage = Dispatch
-    completed = {}     # stage = Completed
+    incoming = {}       # from assembly (stage = Assembly)
+    storage = {}         # stage = Storage
+    dispatch = {}        # stage = Dispatch
+    completed = {}       # stage = Completed
 
     for key, o in orders.items():
         if not isinstance(o, dict):
@@ -49,7 +49,7 @@ def load_orders():
 incoming, storage, dispatch, completed = load_orders()
 
 
-# ---------------- UTILS ----------------
+# ---------------- UTILS (REFACTORED) ----------------
 def parse_dt(s):
     if not s:
         return None
@@ -62,21 +62,30 @@ def parse_dt(s):
         return None
 
 
-def show_qr_inline(b64_data):
-    """Show QR image that was created during order creation."""
+def get_qr_raw_data(b64_data):
+    """Safely decode base64 QR data and return raw bytes."""
+    if not b64_data:
+        return None
     try:
-        raw = base64.b64decode(b64_data + "===")
-        st.image(raw, width=110)
+        # The '===' padding is added for robustness
+        return base64.b64decode(b64_data + "===")
     except:
+        return None
+
+
+def show_qr_inline(raw_data, width=110):
+    """Show QR image from raw bytes."""
+    if raw_data:
+        st.image(raw_data, width=width)
+    else:
         st.warning("QR not available")
 
 
-def dl_qr(b64_data):
-    try:
-        raw = base64.b64decode(b64_data + "===")
-        st.download_button("⬇ Download QR", raw, "order_qr.png", "image/png", use_container_width=True)
-    except:
-        pass
+def dl_qr(raw_data):
+    """Provide download button for QR from raw bytes."""
+    if raw_data:
+        st.download_button("⬇ Download QR", raw_data, "order_qr.png", "image/png", use_container_width=True)
+    # No warning if data is missing, just no button
 
 
 # ---------------- TABS ----------------
@@ -88,7 +97,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ============================================================
-# TAB 1 → INCOMING
+# TAB 1 → INCOMING (Modified QR display)
 # ============================================================
 with tab1:
 
@@ -136,6 +145,7 @@ with tab1:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
+        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
 
         assembly_done = parse_dt(o.get("assembly_completed_at"))
 
@@ -161,8 +171,7 @@ with tab1:
                     st.warning("N/A")
 
             with cols[5]:
-                if qr:
-                    show_qr_inline(qr)
+                show_qr_inline(qr_raw) # CHANGED
 
             b1, b2 = st.columns(2)
 
@@ -182,7 +191,7 @@ with tab1:
 
 
 # ============================================================
-# TAB 2 → STORAGE
+# TAB 2 → STORAGE (Modified QR display)
 # ============================================================
 with tab2:
 
@@ -199,6 +208,7 @@ with tab2:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
+        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
 
         started = parse_dt(o.get("storage_started_at"))
         time_in_storage = "N/A"
@@ -217,8 +227,7 @@ with tab2:
             cols[3].metric("Time in Storage", time_in_storage)
 
             with cols[4]:
-                if qr:
-                    show_qr_inline(qr)
+                show_qr_inline(qr_raw) # CHANGED
 
             if st.button("🚀 Move to Dispatch", key=f"s2d_{key}", use_container_width=True):
                 update(f"orders/{key}", {
@@ -229,7 +238,7 @@ with tab2:
 
 
 # ============================================================
-# TAB 3 → DISPATCH
+# TAB 3 → DISPATCH (Modified QR display)
 # ============================================================
 with tab3:
 
@@ -246,6 +255,7 @@ with tab3:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
+        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
 
         with st.container(border=True):
             cols = st.columns([3, 1, 1, 2])
@@ -255,8 +265,7 @@ with tab3:
             cols[2].metric("Priority", priority)
 
             with cols[3]:
-                if qr:
-                    show_qr_inline(qr)
+                show_qr_inline(qr_raw) # CHANGED
 
             st.markdown("#### Dispatch Details")
 
@@ -288,7 +297,7 @@ with tab3:
 
 
 # ============================================================
-# TAB 4 → COMPLETED
+# TAB 4 → COMPLETED (Modified QR display/download)
 # ============================================================
 with tab4:
 
@@ -306,6 +315,7 @@ with tab4:
         tracking = o.get("tracking_number", "N/A")
         notes = o.get("dispatch_notes", "N/A")
         qr = o.get("order_qr")
+        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
 
         completed_dt = parse_dt(o.get("completed_at"))
         completed_txt = completed_dt.strftime("%Y-%m-%d %H:%M") if completed_dt else "N/A"
@@ -316,7 +326,13 @@ with tab4:
             st.markdown(f"**Completed At:** {completed_txt}")
             st.markdown(f"**Notes:** {notes}")
 
-            if qr:
-                show_qr_inline(qr)
-                dl_qr(qr)
-
+            if qr_raw: # CHANGED: Check decoded data for presence
+                # Use columns to neatly separate the QR image and download button
+                c_qr, c_dl = st.columns([1, 4])
+                with c_qr:
+                    show_qr_inline(qr_raw, width=150) # CHANGED: Use raw data
+                with c_dl:
+                    st.markdown("<br>", unsafe_allow_html=True) # Add spacing
+                    dl_qr(qr_raw)                           # CHANGED: Use raw data
+            else:
+                st.warning("QR not available for this order.")
