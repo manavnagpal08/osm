@@ -1,0 +1,9 @@
+{
+  "name": "SRP Admin Notifications",
+  "short_name": "SRP Notify",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d47a1",
+  "icons": []
+}
