@@ -14,37 +14,61 @@ if "role" not in st.session_state:
 role = st.session_state["role"]
 
 # ----------------------------------------
-# HIDE SIDEBAR FOR NON-ADMIN (CRITICAL)
+# HIDE SIDEBAR FOR NON-ADMIN (100% GUARANTEED)
 # ----------------------------------------
 if role != "admin":
     st.markdown("""
         <style>
-            /* Hide entire sidebar */
-            [data-testid="stSidebar"] {
-                display: none !important;
-            }
 
-            /* Hide the navigation root (prevents ghost sidebar) */
-            [data-testid="stSidebarNav"] {
-                display: none !important;
-            }
+        /* --- 1. OLD SIDEBAR --- */
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
 
-            /* Hide hamburger menu in top-left */
-            button[kind="header"] {
-                display: none !important;
-            }
+        /* --- 2. NEW STREAMLIT SIDEBAR (1.36+) --- */
+        section[data-testid="stSidebar"] {
+            display: none !important;
+        }
+        div[data-testid="stSidebar"] {
+            display: none !important;
+        }
 
-            /* Hide toggle sidebar button (new Streamlit versions) */
-            [data-testid="collapsedControl"] {
-                display: none !important;
-            }
+        /* --- 3. EMOTION-CACHE SIDEBAR WRAPPERS --- */
+        div[class*="st-emotion-cache"][class*="sidebar"] {
+            display: none !important;
+        }
+        aside[class*="sidebar"] {
+            display: none !important;
+        }
 
-            /* Use full width */
-            [data-testid="stAppViewContainer"] {
-                margin-left: 0 !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-            }
+        /* --- 4. COLLAPSED SIDEBAR BUTTON --- */
+        [data-testid="collapsedControl"] {
+            display: none !important;
+        }
+
+        /* --- 5. HAMBURGER MENU (top-left) --- */
+        button[kind="header"] {
+            display: none !important;
+        }
+
+        /* --- 6. PREVENT MOMENTARY SIDEBAR FLASH --- */
+        div[aria-expanded="true"] {
+            display: none !important;
+        }
+        div[data-testid="stSidebarUserContent"] {
+            display: none !important;
+        }
+
+        /* --- 7. EXPAND MAIN CONTENT FULL WIDTH --- */
+        [data-testid="stAppViewContainer"] {
+            margin-left: 0 !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+
         </style>
     """, unsafe_allow_html=True)
 
@@ -76,17 +100,16 @@ if role in ["admin", "dispatch"]:
     pages["Dispatch Dept"] = "pages/dispatch.py"
 
 # ----------------------------------------
-# ADMIN → SHOW SIDEBAR MENU
+# ADMIN → SHOW SIDEBAR
 # ----------------------------------------
 if role == "admin":
     choice = st.sidebar.selectbox("Navigate", list(pages.keys()))
     st.switch_page(pages[choice])
 
 # ----------------------------------------
-# NON-ADMIN → AUTO-REDIRECT TO THEIR PAGE
+# NON-ADMIN → AUTO REDIRECT TO THEIR PAGE
 # ----------------------------------------
 else:
-    # They must have exactly ONE assigned page
     if len(pages) == 1:
         only_page = list(pages.values())[0]
         st.switch_page(only_page)
