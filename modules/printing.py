@@ -321,10 +321,9 @@ with tab1:
             order_id = o.get("order_id")
             design_files = o.get("design_files", {})
             mockup_files = o.get("printing_mockups", {})
+            product_type = o.get("product_type", "N/A").lower() # Get the product type for routing
             
             printing_specs = o.get("printing_specs", {})
-            
-            # Fetch admin notes from order data
             current_admin_notes = o.get("admin_notes", "No specific instructions from Admin/Sales.")
             
             with st.container(border=True):
@@ -335,6 +334,7 @@ with tab1:
                 with header_col:
                     st.markdown(f"## 🖨️ Job: **{order_id}**")
                     st.markdown(f"Customer: **{o.get('customer')}** | Item: **{o.get('item')}**")
+                    st.markdown(f"**Product Type:** `{o.get('product_type', 'N/A')}`") # Display product type
                 
                 with metric_col:
                     st.metric("Qty", o.get('qty', 'N/A'))
@@ -362,18 +362,14 @@ with tab1:
                 # ===============================================
                 st.subheader("⚙️ Specifications & Assignment")
                 
-                # Layout based on role (Admin gets 4 columns, Printer gets 3 fields + 1 read-only assignment)
-                if IS_ADMIN:
-                    a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
-                else:
-                    a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
+                # Layout based on role 
+                a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
                 
                 current_assignee = printing_specs.get("assigned_to", "Unassigned")
                 
                 # Assigned To (Controlled Access)
                 with a_col:
                     if IS_ADMIN:
-                        # Admin sees editable select box
                         new_assignee = st.selectbox(
                             "Assigned To",
                             options=printer_names,
@@ -381,9 +377,8 @@ with tab1:
                             key=f"assign_{key}"
                         )
                     else:
-                        # Printing team sees read-only text
                         st.text_input("Assigned To (Admin Only)", value=current_assignee, disabled=True, key=f"assign_ro_{key}")
-                        new_assignee = current_assignee # Keep current value for save operation (if admin changes other specs)
+                        new_assignee = current_assignee 
 
                 # Paper Quality
                 with pq_col:
@@ -501,13 +496,11 @@ with tab1:
                 with msg_admin:
                     st.markdown("### 🗣️ Communication Log (Admin/Sales)")
                     
-                    # --- BUG FIX IMPLEMENTED HERE ---
-                    # Admin can edit, others see read-only.
                     new_admin_notes = st.text_area(
                         "Admin/Sales Notes",
                         value=current_admin_notes,
                         height=120,
-                        disabled=not IS_ADMIN, # ONLY ADMIN can change this
+                        disabled=not IS_ADMIN, 
                         key=f"admin_msg_{key}"
                     )
                     
@@ -517,7 +510,6 @@ with tab1:
                         st.rerun()
                     elif not IS_ADMIN:
                         st.caption("This field is read-only for the Printing Department.")
-                    # -----------------------------------
                     
 
                 with msg_print:
@@ -541,18 +533,38 @@ with tab1:
 
                 st.markdown("---")
                 
-                # COMPLETE PRINTING BUTTON
-                if st.button(f"🚀 Job Complete: Move to LAMINATION", key=f"done_{key}", type="primary", use_container_width=True):
+                # ===============================================
+                # CONDITIONAL COMPLETION BUTTON
+                # ===============================================
+                
+                next_stage = ""
+                button_label = ""
+                
+                if product_type == "box":
+                    next_stage = "Lamination"
+                    button_label = "🚀 Job Complete: Move to LAMINATION"
+                    
+                elif product_type == "bag":
+                    next_stage = "Assembly"
+                    button_label = "🚀 Job Complete: Move to ASSEMBLY (Skip Lamination)"
+                    
+                else:
+                    next_stage = "Lamination" # Default to Lamination if type is unknown/missing
+                    button_label = f"🚀 Job Complete: Move to LAMINATION (Default route)"
+                    st.warning(f"Product type is '{o.get('product_type', 'N/A')}', defaulting to LAMINATION.")
+
+
+                if st.button(button_label, key=f"done_{key}", type="primary", use_container_width=True):
 
                     now_fmt = now_ist_formatted()
 
                     update(f"orders/{key}", {
-                        "stage": "Lamination",
+                        "stage": next_stage, # Set the correct next stage
                         "printing_completed_at": now_fmt
                     })
 
                     st.balloons()
-                    st.success("Moved to Lamination!")
+                    st.success(f"Moved to **{next_stage}**!")
                     st.rerun()
 
 # ---------------------------
@@ -576,6 +588,8 @@ with tab2:
 
                 st.markdown(f"## ✔️ Order **{order_id}** — {o.get('customer')}")
                 st.caption(f"Completed on: **{o.get('printing_completed_at','N/A')}** | Assigned Printer: **{printing_specs.get('assigned_to', 'N/A')}**")
+                st.info(f"Final Stage Moved To: **{o.get('stage', 'N/A')}**")
+
 
                 st.subheader("Job Details")
                 spec_cols = st.columns(3)
@@ -637,10 +651,8 @@ with tab2:
                 note_col1, note_col2 = st.columns(2)
                 
                 with note_col1:
-                    # Display Admin notes
                     st.info(f"**Admin/Sales Note:** {o.get('admin_notes', 'N/A')}")
                 with note_col2:
-                    # Display Printing notes
                     st.info(f"**Printing Note:** {printing_specs.get('printing_notes', 'N/A')}")
                 
                 st.markdown("---")
