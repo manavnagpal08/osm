@@ -48,17 +48,99 @@ for user_dict in users_data.values():
 if len(printer_names) == 1:
     printer_names.extend(["Printer A", "Printer B"]) 
 
-pending = {}
-completed = {}
+all_pending_orders = {}
+all_completed_orders = {}
+all_paper_qualities = set() # To populate the filter options
 
 for key, o in orders.items():
     if not isinstance(o, dict):
         continue
 
+    # Collect unique paper qualities for filter options
+    printing_specs = o.get("printing_specs", {})
+    paper_quality = printing_specs.get("paper_quality")
+    if paper_quality and paper_quality.strip():
+        all_paper_qualities.add(paper_quality.strip())
+
     if o.get("stage") == "Printing":
-        pending[key] = o
+        all_pending_orders[key] = o
     elif o.get("printing_completed_at"):
-        completed[key] = o
+        all_completed_orders[key] = o
+
+# Sort paper qualities and add "All" option
+paper_quality_options = ["All"] + sorted(list(all_paper_qualities))
+assigned_to_options = ["All"] + printer_names
+
+# ========================================================
+# FILTER AND SEARCH SETUP (MAIN PAGE)
+# ========================================================
+
+st.header("🔎 Job Filters")
+search_col, assign_col, quality_col = st.columns([2, 1, 1.5])
+
+with search_col:
+    # Search
+    search_query = st.text_input(
+        "Search by Order ID or Customer Name", 
+        key="printing_search_global",
+        placeholder="Enter Order ID or Customer Name..."
+    ).lower()
+
+with assign_col:
+    # Assigned To Filter
+    assign_filter = st.selectbox(
+        "Filter by Assigned Printer",
+        options=assigned_to_options,
+        index=0,
+        key="assign_filter",
+        label_visibility="visible"
+    )
+
+with quality_col:
+    # Paper Quality Filter
+    quality_filter = st.selectbox(
+        "Filter by Paper Quality",
+        options=paper_quality_options,
+        index=0,
+        key="quality_filter",
+        label_visibility="visible"
+    )
+
+st.markdown("---")
+
+
+# 2. Function to apply filters
+def apply_filters(orders_dict, search_q, assign_f, quality_f):
+    filtered_orders = {}
+    for key, order in orders_dict.items():
+        
+        printing_specs = order.get("printing_specs", {})
+        
+        # Assigned Filter Check
+        assigned_to = printing_specs.get("assigned_to", "Unassigned")
+        assign_match = (assign_f == "All" or assigned_to == assign_f)
+        
+        # Quality Filter Check
+        paper_quality = printing_specs.get("paper_quality", "")
+        quality_match = (quality_f == "All" or paper_quality == quality_f)
+        
+        # Search Filter Check
+        search_match = True
+        if search_q:
+            order_id = order.get("order_id", "").lower()
+            customer = order.get("customer", "").lower()
+            
+            if search_q not in order_id and search_q not in customer:
+                search_match = False
+                
+        if assign_match and quality_match and search_match:
+            filtered_orders[key] = order
+            
+    return filtered_orders
+
+# 3. Apply filters to both sets
+filtered_pending = apply_filters(all_pending_orders, search_query, assign_filter, quality_filter)
+filtered_completed = apply_filters(all_completed_orders, search_query, assign_filter, quality_filter)
 
 # ---------------------------
 # FILE UTILITIES
@@ -67,7 +149,6 @@ for key, o in orders.items():
 def file_download_button(label, file_entry, order_id, file_label, key_prefix):
     """Handles file download using the file entry dictionary."""
     if not file_entry or not file_entry.get("data"):
-        # Not using st.warning here for cleaner expander view
         return
     
     b64_data = file_entry.get("data")
@@ -113,11 +194,9 @@ def preview_file(label, file_entry):
 
     st.markdown(f"**{label}**")
 
-    # Preview image (PNG/JPG detection)
     if header.startswith(b"\x89PNG") or header[0:3] == b"\xff\xd8\xff":
         st.image(raw, use_container_width=True)
 
-    # Indicate PDF
     elif header.startswith(b"%PDF"):
         st.caption("PDF file detected. Use the **Download** button to view.")
 
@@ -126,12 +205,55 @@ def preview_file(label, file_entry):
     
     return raw
 
+def generate_order_report(order: dict) -> str:
+    """Generates a detailed text report string for easy download/print-to-PDF."""
+    
+    order_id = order.get("order_id", "N/A")
+    design_specs = order.get("design_specs", {})
+    printing_specs = order.get("printing_specs", {})
+    
+    report = f"===============================================\n"
+    report += f"         PRODUCTION REPORT - ORDER {order_id}          \n"
+    report += f"         Generated on: {now_ist_formatted()}        \n"
+    report += f"===============================================\n\n"
+
+    # 1. GENERAL ORDER DETAILS
+    report += "--- GENERAL ORDER DETAILS ---\n"
+    report += f"Customer: {order.get('customer', 'N/A')}\n"
+    report += f"Item: {order.get('item', 'N/A')}\n"
+    report += f"Quantity: {order.get('qty', 'N/A')}\n"
+    report += f"Product Type: {order.get('product_type', 'N/A')}\n"
+    report += f"Due Date: {order.get('due', 'N/A')}\n"
+    report += f"Current Stage: {order.get('stage', 'N/A')}\n\n"
+    
+    # 2. DESIGN SPECIFICATIONS & TIME
+    report += "--- DESIGN DETAILS ---\n"
+    report += f"Designer: {design_specs.get('assigned_to', 'N/A')}\n"
+    report += f"Design Started: {order.get('design_start_time', 'N/A')}\n"
+    report += f"Design Completed: {order.get('design_end_time', 'N/A')}\n"
+    report += f"Design Notes: {order.get('design_notes', 'None provided')}\n\n"
+
+    # 3. PRINTING SPECIFICATIONS
+    report += "--- PRINTING SPECIFICATIONS ---\n"
+    report += f"Assigned To: {printing_specs.get('assigned_to', 'N/A')}\n"
+    report += f"Paper Quality: {printing_specs.get('paper_quality', 'N/A')}\n"
+    report += f"Paper Size: {printing_specs.get('paper_size', 'N/A')}\n"
+    report += f"Board Size: {printing_specs.get('board_size', 'N/A')}\n"
+    report += f"Admin/Sales Message: {order.get('admin_notes', 'N/A')}\n"
+    report += f"Printing Notes: {printing_specs.get('printing_notes', 'None provided')}\n\n"
+
+    report += "===============================================\n"
+    report += "END OF REPORT\n"
+    report += "===============================================\n"
+    
+    return report
+
 # ---------------------------
 # MAIN TABS
 # ---------------------------
 tab1, tab2 = st.tabs([
-    f"🛠️ Pending Jobs ({len(pending)})",
-    f"✅ Completed Jobs ({len(completed)})"
+    f"🛠️ Pending Jobs ({len(filtered_pending)})",
+    f"✅ Completed Jobs ({len(filtered_completed)})"
 ])
 
 # ---------------------------
@@ -139,10 +261,10 @@ tab1, tab2 = st.tabs([
 # ---------------------------
 with tab1:
 
-    if not pending:
-        st.success("🎉 No pending printing jobs!")
+    if not filtered_pending:
+        st.success("🎉 No pending printing jobs matching your filters!")
     else:
-        for key, o in pending.items():
+        for key, o in filtered_pending.items():
 
             order_id = o.get("order_id")
             design_files = o.get("design_files", {})
@@ -154,7 +276,7 @@ with tab1:
             with st.container(border=True):
                 
                 # ROW: ORDER HEADER AND METRICS
-                header_col, metric_col = st.columns([2, 1])
+                header_col, metric_col, report_col = st.columns([2, 1, 1])
 
                 with header_col:
                     st.markdown(f"## 🖨️ Job: **{order_id}**")
@@ -163,6 +285,20 @@ with tab1:
                 with metric_col:
                     st.metric("Qty", o.get('qty', 'N/A'))
                     st.metric("Due Date", o.get('due', 'N/A'))
+
+                # REPORT BUTTON
+                with report_col:
+                    st.markdown("##### ") 
+                    report_content = generate_order_report(o)
+                    st.download_button(
+                        label="📄 Generate Full Report (TXT)",
+                        data=report_content,
+                        file_name=f"{order_id}_Production_Report.txt",
+                        mime="text/plain",
+                        key=f"report_dl_{key}",
+                        use_container_width=True
+                    )
+                    st.caption("Download and use 'Print to PDF'.")
 
 
                 st.markdown("---")
@@ -219,7 +355,6 @@ with tab1:
                         "paper_size": new_paper_size,
                         "board_size": new_board_size
                     }
-                    # Preserve printing_notes
                     current_notes = printing_specs.get("printing_notes")
                     if current_notes is not None:
                          updated_specs["printing_notes"] = current_notes
@@ -331,8 +466,7 @@ with tab1:
                 # COMPLETE PRINTING BUTTON
                 if st.button(f"🚀 Job Complete: Move to LAMINATION", key=f"done_{key}", type="primary", use_container_width=True):
 
-                    now_raw = now_ist_raw()
-                    now_fmt = now_ist_formatted() # Using formatted for display ease later
+                    now_fmt = now_ist_formatted()
 
                     update(f"orders/{key}", {
                         "stage": "Lamination",
@@ -350,10 +484,10 @@ with tab2:
 
     st.header("✅ Completed Printing Jobs")
     
-    if not completed:
-        st.info("No completed printing orders yet.")
+    if not filtered_completed:
+        st.info("No completed printing orders matching your filters yet.")
     else:
-        for key, o in completed.items():
+        for key, o in filtered_completed.items():
 
             order_id = o.get("order_id")
             design_files = o.get("design_files", {})
@@ -365,14 +499,22 @@ with tab2:
                 st.markdown(f"## ✔️ Order **{order_id}** — {o.get('customer')}")
                 st.caption(f"Completed on: **{o.get('printing_completed_at','N/A')}** | Assigned Printer: **{printing_specs.get('assigned_to', 'N/A')}**")
 
-                st.markdown("---")
-
-                # Specs in a clean row
                 st.subheader("Job Details")
                 spec_cols = st.columns(3)
                 spec_cols[0].markdown(f"**Paper Quality:** `{printing_specs.get('paper_quality', 'N/A')}`")
                 spec_cols[1].markdown(f"**Paper Size:** `{printing_specs.get('paper_size', 'N/A')}`")
                 spec_cols[2].markdown(f"**Board Size:** `{printing_specs.get('board_size', 'N/A')}`")
+
+                # Report download button
+                report_content = generate_order_report(o)
+                st.download_button(
+                    label="📄 Download Archived Report (TXT)",
+                    data=report_content,
+                    file_name=f"{order_id}_Production_Report_ARCHIVED.txt",
+                    mime="text/plain",
+                    key=f"report_comp_dl_{key}",
+                    use_container_width=False
+                )
 
                 st.markdown("---")
 
