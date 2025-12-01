@@ -22,6 +22,13 @@ GMAIL_USER = "yourgmail@gmail.com"
 GMAIL_PASS = "your_app_password"
 
 # ---------------------------------------------------
+# HELPER INITIALISATION
+# ---------------------------------------------------
+if "order_created_flag" not in st.session_state:
+    st.session_state["order_created_flag"] = False
+
+
+# ---------------------------------------------------
 # QR GENERATOR
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
@@ -33,6 +40,7 @@ def generate_qr_base64(order_id: str):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
+
 
 # ---------------------------------------------------
 # WHATSAPP
@@ -49,6 +57,7 @@ def get_whatsapp_link(phone, order_id, customer):
     )
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
+
 
 # ---------------------------------------------------
 # EMAIL
@@ -69,109 +78,86 @@ def send_gmail(to, subject, html):
         st.error(f"Email Error: {e}")
         return False
 
+
 # ---------------------------------------------------
-# PDF GENERATOR
+# PDF GENERATOR  (FINAL VERSION PROVIDED EARLIER)
+# ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
     logo_path = "srplogo.png"
-
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(temp_file.name, pagesize=A4)
 
     width, height = A4
     x_margin = 40
-
-    # ============================================================
-    #                 PREMIUM GREEN HEADER (FINAL VERSION)
-    # ============================================================
-
     HEADER_HEIGHT = 160
 
-    # Background green bar
+    # Header Background
     c.setFillColorRGB(0.05, 0.48, 0.22)
     c.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, stroke=0, fill=1)
 
-    # -------------------------------
-    # BIG LOGO (Left Side)
-    # -------------------------------
+    # Logo
     try:
         c.drawImage(
             logo_path,
             x_margin,
             height - HEADER_HEIGHT + 30,
-            width=130,                   # BIGGER LOGO
+            width=130,
             preserveAspectRatio=True,
             mask="auto"
         )
     except:
         pass
 
-    # --------------------------------
-    # VERTICAL SEPARATOR LINE
-    # --------------------------------
-    separator_x = x_margin + 160       # moved right for bigger logo
+    # Separator Line
+    separator_x = x_margin + 160
     c.setStrokeColorRGB(1, 1, 1)
     c.setLineWidth(1.4)
     c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
 
-    # --------------------------------
-    # COMPANY NAME + TAGLINE (Centered Vertically)
-    # --------------------------------
+    # Company Name + Tagline
     left_block_x = separator_x + 20
     top_y = height - 60
 
     c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Bold", 30)  # bigger title
+    c.setFont("Helvetica-Bold", 30)
     c.drawString(left_block_x, top_y, "Shree Ram Packers")
 
     c.setFont("Helvetica", 14)
     c.drawString(left_block_x, top_y - 25, "Premium Packaging & Printing Solutions")
 
-    # --------------------------------
-    # CONTACT DETAILS BELOW (Not inline)
-    # --------------------------------
+    # Contact info under tagline
     info_y = top_y - 55
     c.setFont("Helvetica", 12)
-
-    contact_lines = [
+    for line in [
         "Mobile: 9312215239",
         "GSTIN: 29BCIPK6225L1Z6",
         "Website: https://srppackaging.com/"
-    ]
-
-    for line in contact_lines:
+    ]:
         c.drawString(left_block_x, info_y, line)
         info_y -= 18
 
-    # --------------------------------
-    # GREEN DIVIDER UNDER HEADER
-    # --------------------------------
+    # Header Divider
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
     c.setLineWidth(3)
     c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
 
-    # Reset colors
     c.setFillColorRGB(0, 0, 0)
     y = height - HEADER_HEIGHT - 40
 
-    # ============================================================
-    # CUSTOMER DETAILS
-    # ============================================================
-
+    # Customer Details
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Customer Details")
     y -= 20
     c.line(x_margin, y, width - x_margin, y)
     y -= 15
 
-    customer_fields = [
+    for label, value in [
         ("Customer Name", data["customer"]),
         ("Phone", data["customer_phone"]),
         ("Email", data["customer_email"]),
         ("Received Date", data["received"]),
         ("Due Date", data["due"]),
-    ]
-
-    for label, value in customer_fields:
+    ]:
         c.setFont("Helvetica-Bold", 11)
         c.drawString(x_margin, y, f"{label}:")
         c.setFont("Helvetica", 11)
@@ -180,17 +166,14 @@ def generate_order_pdf(data, qr_b64):
 
     y -= 15
 
-    # ============================================================
-    # ORDER DETAILS
-    # ============================================================
-
+    # Order Details
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Order Details")
     y -= 20
     c.line(x_margin, y, width - x_margin, y)
     y -= 20
 
-    order_fields = [
+    for label, value in [
         ("Product Type", data["product_type"]),
         ("Priority", data["priority"]),
         ("Quantity", data["qty"]),
@@ -202,25 +185,19 @@ def generate_order_pdf(data, qr_b64):
         ("Foil ID", data["foil_id"]),
         ("Spot UV ID", data["spotuv_id"]),
         ("Description", data["item"]),
-    ]
-
-    for label, value in order_fields:
+    ]:
         c.setFont("Helvetica-Bold", 11)
         c.drawString(x_margin, y, f"{label}:")
         c.setFont("Helvetica", 11)
         c.drawString(x_margin + 180, y, str(value))
         y -= 18
-
         if y < 140:
             c.showPage()
             y = height - 80
 
     y -= 15
 
-    # ============================================================
-    # QR CODE
-    # ============================================================
-
+    # QR Code
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
@@ -233,13 +210,8 @@ def generate_order_pdf(data, qr_b64):
 
     c.drawImage(qr_temp.name, width - 180, y, width=130, height=130)
 
-    # ============================================================
-    # FOOTER
-    # ============================================================
-
-    c.setLineWidth(0.4)
+    # Footer
     c.line(x_margin, 60, width - x_margin, 60)
-
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(x_margin, 45, "Generated automatically by SRP OMS")
     c.drawRightString(width - x_margin, 45, "Powered by SRP Automation")
@@ -247,6 +219,8 @@ def generate_order_pdf(data, qr_b64):
     c.save()
     return temp_file.name
 
+
+# ---------------------------------------------------
 # UI
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
@@ -256,8 +230,9 @@ customer_list = sorted(list(set(
     o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
 )))
 
+
 # ---------------------------------------------------
-# STEP 1 – CUSTOMER
+# STEP 1 — CUSTOMER BLOCK
 # ---------------------------------------------------
 box = st.container(border=True)
 with box:
@@ -271,7 +246,7 @@ with box:
         order_type_simple = "New" if order_type.startswith("New") else "Repeat"
 
     with col2:
-        # Persist new order inputs so Streamlit doesn't clear them
+        # Maintain persistent fields
         customer_input = st.session_state.get("customer_input", "")
         customer_phone_input = st.session_state.get("customer_phone_input", "")
         customer_email_input = st.session_state.get("customer_email_input", "")
@@ -310,8 +285,9 @@ with box:
             customer_phone_input = st.text_input("Phone", customer_phone_input)
             customer_email_input = st.text_input("Email", customer_email_input)
 
+
 # ---------------------------------------------------
-# STEP 2 – PREVIOUS ORDER AUTOFILL
+# STEP 2 — REPEAT ORDER AUTOFILL
 # ---------------------------------------------------
 previous_order = None
 
@@ -334,10 +310,11 @@ if order_type_simple == "Repeat" and customer_input:
                     st.success("Auto-fill applied!")
                     break
 
+
 # ---------------------------------------------------
-# STEP 3 – MAIN FORM
+# STEP 3 — MAIN FORM
 # ---------------------------------------------------
-with st.form("order_form", clear_on_submit=True):
+with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
 
     st.subheader("3️⃣ Order Specification")
     st.divider()
@@ -385,6 +362,7 @@ with st.form("order_form", clear_on_submit=True):
 
     if submitted:
 
+        # FIX: Persist values
         customer = customer_input.strip()
         customer_phone = customer_phone_input.strip()
         customer_email = customer_email_input.strip()
@@ -435,7 +413,9 @@ with st.form("order_form", clear_on_submit=True):
         st.session_state["last_order_id"] = order_id
         st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone, order_id, customer)
         st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
+        st.session_state["order_created_flag"] = True  # Keep active until new order created
 
+        # Send Email if needed
         if customer_email:
             html_email = f"""
             <h2>Your Order {order_id} is Created</h2>
@@ -446,8 +426,8 @@ with st.form("order_form", clear_on_submit=True):
             """
             send_gmail(customer_email, f"Order {order_id} Created", html_email)
 
-        st.session_state["order_created_flag"] = True
         st.rerun()
+
 
 # ---------------------------------------------------
 # SUCCESS BLOCK (OUTSIDE FORM)
@@ -469,6 +449,4 @@ if st.session_state.get("order_created_flag"):
 
     st.markdown(f"[💬 Send via WhatsApp]({st.session_state['last_whatsapp']})")
 
-    st.balloons()
-
-    st.session_state["order_created_flag"] = False
+    # ❌ FIX: Removed the line that cleared the flag.
