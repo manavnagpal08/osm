@@ -10,7 +10,7 @@ st.set_page_config(page_title="OMS Dashboard", layout="wide")
 # LOGIN CHECK
 # ----------------------------------------
 if "role" not in st.session_state:
-    st.switch_page("pages/login.py")
+    st.switch_page("app_pages/login.py")
 
 role = st.session_state["role"]
 
@@ -63,7 +63,6 @@ if role != "admin":
         </style>
     """, unsafe_allow_html=True)
 
-# ----------------------------------------
 # TITLE & ROLE
 # ----------------------------------------
 st.title("📦 Order Management System")
@@ -75,20 +74,20 @@ st.caption(f"Logged in as **{st.session_state['username']}** | Role: {role}")
 pages = {}
 
 if role in ["admin", "design"]:
-    pages["Create Order"] = "pages/create_order.py"
-    pages["Design Dept"] = "pages/design.py"
+    pages["Create Order"] = "app_pages/create_order.py"
+    pages["Design Dept"] = "app_pages/design.py"
 
 if role in ["admin", "printing"]:
-    pages["Printing Dept"] = "pages/printing.py"
+    pages["Printing Dept"] = "app_pages/printing.py"
 
 if role in ["admin", "diecut"]:
-    pages["Die-Cut Dept"] = "pages/diecut.py"
+    pages["Die-Cut Dept"] = "app_pages/diecut.py"
 
 if role in ["admin", "assembly"]:
-    pages["Assembly Dept"] = "pages/assembly.py"
+    pages["Assembly Dept"] = "app_pages/assembly.py"
 
 if role in ["admin", "dispatch"]:
-    pages["Dispatch Dept"] = "pages/dispatch.py"
+    pages["Dispatch Dept"] = "app_pages/dispatch.py"
 
 # ----------------------------------------
 # ADMIN – SHOW SIDEBAR
