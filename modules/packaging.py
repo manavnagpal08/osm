@@ -4,6 +4,7 @@ import base64
 from datetime import datetime, timezone, timedelta
 
 # ---------------- FIX PLAN STEP 1: INITIALIZE TAB STATE ----------------
+# We still use this to control the active tab after a button click/rerun
 if "active_logistics_tab" not in st.session_state:
     st.session_state.active_logistics_tab = 0
 # ---------------- END STEP 1 ----------------
@@ -90,7 +91,7 @@ def dl_qr(raw_data):
         st.download_button("⬇ Download QR", raw_data, "order_qr.png", "image/png", use_container_width=True)
 
 
-# ---------------- FIX PLAN STEP 2: CREATE TABS WITH KEY ----------------
+# ---------------- FIX PLAN STEP 2: CREATE TABS WITHOUT KEY ----------------
 tab_titles = [
     "📥 Incoming From Assembly",
     "🏬 Storage",
@@ -98,8 +99,9 @@ tab_titles = [
     "✅ Completed Orders"
 ]
 
-# Use the session state variable as the key to ensure state is managed correctly
-tab1, tab2, tab3, tab4 = st.tabs(tab_titles, key="active_logistics_tab")
+# FIX: Remove 'key' argument which causes error in older Streamlit versions.
+# We now rely on st.session_state.active_logistics_tab being set before st.tabs() runs.
+tab1, tab2, tab3, tab4 = st.tabs(tab_titles)
 # ---------------- END STEP 2 ----------------
 
 
@@ -107,7 +109,7 @@ tab1, tab2, tab3, tab4 = st.tabs(tab_titles, key="active_logistics_tab")
 # TAB 1 → INCOMING
 # ============================================================
 with tab1:
-    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
+    # We rely on the initial tab index set by st.tabs() OR the session state set by a button click
 
     st.subheader(f"Incoming Orders From Assembly ({len(incoming)})")
 
@@ -212,7 +214,7 @@ with tab1:
 # TAB 2 → STORAGE
 # ============================================================
 with tab2:
-    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
+    # We rely on the initial tab index set by st.tabs() OR the session state set by a button click
 
     st.subheader(f"Orders in Storage ({len(storage)})")
 
@@ -262,7 +264,7 @@ with tab2:
 # TAB 3 → DISPATCH
 # ============================================================
 with tab3:
-    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
+    # We rely on the initial tab index set by st.tabs() OR the session state set by a button click
 
     st.subheader(f"Pending Dispatch ({len(dispatch)})")
 
@@ -324,7 +326,7 @@ with tab3:
 # TAB 4 → COMPLETED
 # ============================================================
 with tab4:
-    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
+    # We rely on the initial tab index set by st.tabs() OR the session state set by a button click
 
     st.subheader(f"Completed Orders ({len(completed)})")
 
