@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import altair as alt # Import Altair for advanced charting
-from firebase import read
+# Assuming 'firebase' module exists and has a 'read' function
+from firebase import read 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, Optional, List
 
@@ -12,6 +13,7 @@ st.set_page_config(page_title="Admin Order Overview", page_icon="📋", layout="
 # ROLE CHECK & PAGE SETUP
 # -------------------------------------
 if "role" not in st.session_state:
+    # This assumes 'pages/login.py' is a valid path in your Streamlit app structure
     st.switch_page("pages/login.py")
 
 if st.session_state["role"] != "admin":
@@ -40,16 +42,15 @@ PRODUCTION_STAGES = [
 CRITICAL_DATA_KEYS = ['received', 'due', 'customer', 'qty', 'item', 'product_type', 'priority']
 
 # -------------------------------------
-# UTILITY FUNCTIONS (Enhanced)
+# UTILITY FUNCTIONS (Enhanced & Cached)
 # -------------------------------------
 
-@st.cache_data(ttl=600) # Cache the KPI results for 10 minutes
+@st.cache_data(ttl=600)
 def format_seconds_to_hms(seconds: float) -> str:
     """Converts a duration in seconds to a H:M:S string format."""
-    # Use timedelta for robust formatting
     return str(timedelta(seconds=seconds)).split('.')[0]
 
-@st.cache_data(ttl=600) # Cache function execution to speed up dashboard loading
+@st.cache_data(ttl=600)
 def get_stage_seconds(order: Dict[str, Any], start_key: str, end_key: str) -> Optional[float]:
     """Safely calculates duration in seconds between two ISO timestamps."""
     start = order.get(start_key)
@@ -67,15 +68,13 @@ def calculate_stage_duration(start_time: Optional[str], end_time: Optional[str])
     """Calculates the duration between two ISO format timestamps and returns H:M:S."""
     if start_time and end_time:
         try:
+            # We call get_stage_seconds with a mock order dict to leverage the cache
             diff_seconds = get_stage_seconds({'start': start_time, 'end': end_time}, 'start', 'end')
             if diff_seconds is not None:
                  return f"**{format_seconds_to_hms(diff_seconds)}**"
         except:
             return "N/A (Time Error)"
     return "In Progress"
-
-# NOTE: The get_completion_info and analyze_kpis functions are kept largely the same
-# but now use the optimized/cached helper functions where possible.
 
 def get_completion_info(stage: str) -> Tuple[float, str]:
     """Returns progress percentage and status color based on stage."""
@@ -96,7 +95,7 @@ def get_completion_info(stage: str) -> Tuple[float, str]:
 def analyze_kpis(data_list: List[Dict[str, Any]]):
     """
     Calculates key production metrics, including Cycle Time, On-Time Rate,
-    and Avg Stage Times for a given list of orders.
+    Avg Stage Times, and Data Quality for a given list of orders.
     """
     total_cycle_time_seconds = 0
     on_time_count = 0
@@ -108,11 +107,11 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
     completed_orders = [o for o in data_list if o.get('stage') == 'Completed']
     completed_count = len(completed_orders)
     
-    # NEW: Data quality tracking per key
+    # Data quality tracking per key
     data_quality_breakdown = {key: 0 for key in CRITICAL_DATA_KEYS}
     
     total_orders = len(data_list)
-    missing_data_count = 0
+    orders_with_missing_data = 0
     
     for order in data_list:
         order_id = order.get('order_id', 'Unknown')
@@ -124,7 +123,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
                 data_quality_breakdown[k] += 1
                 has_missing = True
         if has_missing:
-            missing_data_count += 1
+            orders_with_missing_data += 1
 
         if order.get('stage') == 'Completed':
             # 1. Total Cycle Time & On-Time Check (Only for completed orders)
@@ -176,7 +175,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
         on_time_rate = 0.0
         avg_stage_times = {}
         
-    data_quality_score = (1 - (missing_data_count / total_orders)) * 100 if total_orders > 0 else 0.0
+    data_quality_score = (1 - (orders_with_missing_data / total_orders)) * 100 if total_orders > 0 else 0.0
 
     return {
         "completed_count": completed_count,
@@ -189,7 +188,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
         "stage_time_counts": stage_time_counts,
         "stage_performance": stage_performance,
         "data_quality_score": data_quality_score,
-        "data_quality_breakdown": data_quality_breakdown, # New metric
+        "data_quality_breakdown": data_quality_breakdown,
         "total_orders": total_orders
     }
 
@@ -199,6 +198,7 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
 @st.cache_data(ttl=600)
 def fetch_and_analyze_data():
     """Fetches data and runs the initial, cached KPI analysis."""
+    # Assuming 'read("orders")' returns a dict of orders
     orders: Dict[str, Any] = read("orders") or {}
     if not orders or not isinstance(orders, dict):
         return None, None, 0
@@ -220,7 +220,7 @@ on_time_delta = f"{on_time_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
 data_quality_percent = f"{data_quality_score:.1f}%"
 data_quality_delta = f"{data_quality_score - DATA_QUALITY_TARGET:.1f}% vs Target"
 
-# SLA Violation Count (Moved outside of the cached analyze_kpis for simplicity)
+# SLA Violation Count (7 days = 168 hours)
 sla_violation_count = 0
 for o in overall_kpis['completed_orders']: 
     received_str = o.get('received')
@@ -231,7 +231,7 @@ for o in overall_kpis['completed_orders']:
             received_dt = datetime.fromisoformat(received_str)
             completed_dt = datetime.fromisoformat(completed_str)
             cycle_time_hours = (completed_dt - received_dt).total_seconds() / 3600
-            if cycle_time_hours > 168: # 7 days = 168 hours
+            if cycle_time_hours > 168: 
                 sla_violation_count += 1
         except:
             pass 
@@ -241,10 +241,9 @@ efficiency_score = (on_time_rate * 0.7) + (data_quality_score * 0.3)
 
 
 # -------------------------------------
-# KPI COMPARISON AND DISPLAY (Improved Layout)
+## 📊 Executive Summary KPIs
 # -------------------------------------
 
-st.subheader("📊 Executive Summary KPIs")
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 col1.metric("Total Orders", total_orders, "Total in System")
@@ -276,7 +275,7 @@ col6.metric(
 st.divider()
 
 # -------------------------------------
-# DATA QUALITY BREAKDOWN VISUALIZATION (NEW Feature)
+## 🧹 Data Quality Audit Visualization
 # -------------------------------------
 
 st.subheader("🧹 Data Quality Audit: Missing Critical Data")
@@ -295,7 +294,8 @@ dq_chart = alt.Chart(dq_df).mark_bar().encode(
     x=alt.X('Missing Count', title='Number of Orders Missing Data'),
     y=alt.Y('Critical Field', sort='x', title='Required Field'),
     tooltip=['Critical Field', 'Missing Count', alt.Tooltip('Missing %', format='.1f')],
-    color=alt.Color('Missing %', scale=alt.Scale(range=['green', 'red'], domain=[0, max(dq_df['Missing %'].max() * 1.5, 10)]), legend=None)
+    # Using 'reds' scheme for sequential coloring based on severity
+    color=alt.Color('Missing %', scale=alt.Scale(scheme='reds'), legend=None)
 ).properties(
     title="Count of Orders Missing Critical Data Fields"
 )
@@ -305,11 +305,64 @@ st.altair_chart(dq_chart, use_container_width=True)
 
 st.divider()
 
+# -------------------------------------
+## Segmented Performance Analysis
+# -------------------------------------
+st.subheader("Segmented Performance Analysis")
+
+bag_orders = [o for o in all_orders_list if o.get('product_type') == 'Bag']
+box_orders = [o for o in all_orders_list if o.get('product_type') == 'Box']
+
+bag_kpis = analyze_kpis(bag_orders)
+box_kpis = analyze_kpis(box_orders)
+
+col_seg1, col_seg2 = st.columns(2)
+
+# Bag Segment
+with col_seg1:
+    st.markdown("#### Product Type: Bag")
+    if bag_kpis['completed_count'] > 0:
+        bag_rate = bag_kpis['on_time_rate']
+        bag_delta = f"{bag_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
+        
+        st.metric(
+            "OTD Rate (Bags)", 
+            f"{bag_rate:.1f}%", 
+            delta=bag_delta,
+            delta_color="normal" if bag_rate >= ON_TIME_RATE_TARGET else "inverse"
+        )
+        st.markdown(f"**Avg. Cycle Time:** {bag_kpis['avg_cycle_time']}")
+        st.caption(f"{bag_kpis['completed_count']} completed orders analyzed.")
+        with st.expander("Bag Stage Time Breakdown"):
+            st.json(bag_kpis['avg_stage_times'])
+    else:
+        st.info("No completed 'Bag' orders for analysis.")
+
+# Box Segment
+with col_seg2:
+    st.markdown("#### Product Type: Box")
+    if box_kpis['completed_count'] > 0:
+        box_rate = box_kpis['on_time_rate']
+        box_delta = f"{box_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
+        
+        st.metric(
+            "OTD Rate (Boxes)", 
+            f"{box_rate:.1f}%", 
+            delta=box_delta,
+            delta_color="normal" if box_rate >= ON_TIME_RATE_TARGET else "inverse"
+        )
+        st.markdown(f"**Avg. Cycle Time:** {box_kpis['avg_cycle_time']}")
+        st.caption(f"{box_kpis['completed_count']} completed orders analyzed.")
+        with st.expander("Box Stage Time Breakdown"):
+            st.json(box_kpis['avg_stage_times'])
+    else:
+        st.info("No completed 'Box' orders for analysis.")
+
+st.divider()
 
 # -------------------------------------
-# BOTTLENECK & STAGE PERFORMANCE ANALYSIS
+## ⚙️ Bottleneck and Stage Performance 
 # -------------------------------------
-st.subheader("⚙️ Bottleneck and Stage Performance ")
 
 avg_stage_times_seconds = {}
 for stage, total_s in overall_kpis['stage_time_totals'].items():
@@ -318,7 +371,7 @@ for stage, total_s in overall_kpis['stage_time_totals'].items():
         avg_stage_times_seconds[stage] = total_s / count
 
 if avg_stage_times_seconds:
-    # 3. Bottleneck Detection
+    # Bottleneck Detection
     bottleneck_stage = max(avg_stage_times_seconds, key=avg_stage_times_seconds.get)
     bottleneck_time = format_seconds_to_hms(avg_stage_times_seconds[bottleneck_stage])
     
@@ -327,7 +380,7 @@ if avg_stage_times_seconds:
 
     st.markdown("---")
     
-    # 4. Fastest & Slowest Orders (Top Delays)
+    # Fastest & Slowest Orders
     st.markdown("### Top Delays and Exceptional Performance (Fastest/Slowest Orders)")
     
     performance_table = []
@@ -338,8 +391,7 @@ if avg_stage_times_seconds:
         fastest_s, fastest_id = perf['fastest']
         slowest_s, slowest_id = perf['slowest']
         
-        # Only show stages with recorded data
-        if overall_kpis['stage_time_counts'][stage_name] > 0:
+        if overall_kpis['stage_time_counts'].get(stage_name, 0) > 0:
             performance_table.append({
                 "Stage": stage_name,
                 "Fastest Time": format_seconds_to_hms(fastest_s) if fastest_s != float('inf') else "N/A",
@@ -351,15 +403,15 @@ if avg_stage_times_seconds:
 
     st.dataframe(pd.DataFrame(performance_table), use_container_width=True, hide_index=True)
 
+
 st.divider()
 
 # -------------------------------------
-# VISUALIZATIONS
+## 📈 Visualizations
 # -------------------------------------
 
 col_viz1, col_viz2 = st.columns(2)
 
-# Order Count Distribution (Updated with Dataframe for better Altair integration)
 with col_viz1:
     st.subheader("Order Count Distribution by Stage")
     stage_counts: Dict[str, int] = {
@@ -375,8 +427,6 @@ with col_viz1:
         list(stage_counts.items()),
         columns=['Stage', 'Count']
     )
-    
-    chart_data['Order'] = 1 # Dummy variable for stacking/hover
     
     # Altair bar chart with proper sorting
     chart = alt.Chart(chart_data).mark_bar().encode(
@@ -399,7 +449,6 @@ with col_viz2:
             if count > 0:
                 avg_time_chart_data.append({
                     'Stage': stage,
-                    # Convert seconds to minutes for better visualization scale
                     'Avg Time (Min)': (total_s / count) / 60 
                 })
 
@@ -407,12 +456,11 @@ with col_viz2:
         
         st.subheader("Avg. Time Spent Per Stage (Delay Heat-Map)")
         
-        # Create Altair Bar chart where color represents the time
         chart = alt.Chart(avg_df).mark_bar().encode(
             x=alt.X('Stage', sort=list(avg_stage_times_seconds.keys())),
             y=alt.Y('Avg Time (Min)', title='Average Duration (Minutes)'),
-            # Use 'yelloworange-red' for a clear heat map
-            color=alt.Color('Avg Time (Min)', scale=alt.Scale(range='yelloworange-red'), legend=alt.Legend(title="Avg Time (Min)")),
+            # FIX applied: Use 'scheme' for named color palettes
+            color=alt.Color('Avg Time (Min)', scale=alt.Scale(scheme='yelloworange-red'), legend=alt.Legend(title="Avg Time (Min)")),
             tooltip=['Stage', alt.Tooltip('Avg Time (Min)', format='.2f')]
         ).properties(
             title="Stage Time Breakdown (Highest time is the Bottleneck)"
@@ -424,10 +472,9 @@ with col_viz2:
 st.divider()
 
 # -------------------------------------
-# FILTERS PANEL (Improved)
+## 🔍 Filter Panel
 # -------------------------------------
 
-# Quick Filters for immediate action
 st.markdown("#### Quick Action Filters")
 col_q1, col_q2, col_q3 = st.columns(3)
 quick_filter = col_q1.selectbox(
@@ -435,13 +482,11 @@ quick_filter = col_q1.selectbox(
     ["None", "Late or Past Due", "High Priority Active", "Data Quality Issues"]
 )
 
-# Standard Filters (in expander)
 with st.expander("🔍 Advanced Filter & Search Orders", expanded=False):
     
     st.markdown("##### Filter by Stage, Product, and Priority")
     col_s1, col_s2, col_s3 = st.columns(3)
     
-    # Dynamically find all unique values for product type and priority
     product_types = sorted(list(set(o.get('product_type') for o in all_orders_list if o.get('product_type'))))
     priorities = sorted(list(set(o.get('priority') for o in all_orders_list if o.get('priority'))))
 
@@ -467,12 +512,10 @@ with st.expander("🔍 Advanced Filter & Search Orders", expanded=False):
     
     st.markdown("##### Filter by Date Range and Text Search")
     
-    # Date Filters (default 30 days)
     col_d1, col_d2, _ = st.columns([1, 1, 1])
     start_date_filter = col_d1.date_input("Start Date (Received)", value=datetime.today().date() - timedelta(days=30), key="start_date")
     end_date_filter = col_d2.date_input("End Date (Received)", value=datetime.today().date(), key="end_date")
 
-    # Text Filters
     col_t1, col_t2, _ = st.columns([1, 1, 1])
     customer_filter = col_t1.text_input("Customer Name Search")
     order_search = col_t2.text_input("Search Order ID")
@@ -488,14 +531,14 @@ filtered: Dict[str, Any] = {}
 start_dt = datetime.combine(start_date_filter, datetime.min.time())
 end_dt = datetime.combine(end_date_filter, datetime.max.time())
 now = datetime.now()
-data_quality_keys = CRITICAL_DATA_KEYS # Use the centralized list
+data_quality_keys = CRITICAL_DATA_KEYS 
 
 for key, o in orders.items():
 
     if not isinstance(o, dict):
         continue
     
-    # --- QUICK FILTERS ---
+    # --- QUICK FILTERS Logic ---
     is_late_or_past_due = False
     due_str = o.get('due')
     completed_str = o.get('dispatched_at') or o.get('packing_completed_at')
@@ -519,7 +562,7 @@ for key, o in orders.items():
     elif quick_filter == "Data Quality Issues" and not any(not o.get(k) for k in data_quality_keys):
         continue
             
-    # --- STANDARD FILTERS ---
+    # --- STANDARD FILTERS Logic ---
     if stage_filter != "All" and o.get("stage") != stage_filter:
         continue
 
@@ -547,192 +590,188 @@ for key, o in orders.items():
     filtered[key] = o
 
 # -------------------------------------
-# DISPLAY RESULTS & DOWNLOAD BUTTON (NEW Feature)
+# DISPLAY RESULTS & DOWNLOAD
 # -------------------------------------
 st.subheader(f"✅ Filtered Orders: {len(filtered)} found.")
 
 if not filtered:
     st.info("No orders match the selected filters.")
-    # Show the delete button only if there are no filters applied or if the user is certain (moved to dedicated section)
-else:
-    # Sort by received date for better overview
-    sorted_filtered_list: list[Tuple[str, Any]] = sorted(
-        filtered.items(),
-        key=lambda x: x[1].get("received", "2099-12-31"),
-        reverse=True # Show newest first
+    st.stop()
+
+# Sort by received date for better overview
+sorted_filtered_list: list[Tuple[str, Any]] = sorted(
+    filtered.items(),
+    key=lambda x: x[1].get("received", "2099-12-31"),
+    reverse=True 
+)
+
+# --- Summary Table Construction ---
+summary_data = []
+for key, order in sorted_filtered_list:
+    stage = order.get('stage', 'N/A')
+    
+    is_late_indicator = "🟢 On Time"
+    due_dt_raw = order.get('due')
+    total_order_cycle = 'In Progress'
+
+    if due_dt_raw:
+        try:
+            due_dt = datetime.fromisoformat(due_dt_raw)
+            completed_str = order.get('dispatched_at') or order.get('packing_completed_at')
+            
+            if stage == 'Completed' and completed_str:
+                completed_dt = datetime.fromisoformat(completed_str)
+                total_order_cycle = calculate_stage_duration(order.get('received'), completed_str)
+                if completed_dt > due_dt:
+                    is_late_indicator = "🔴 Late"
+            elif datetime.now() > due_dt:
+                is_late_indicator = "🟠 Past Due"
+        except:
+            is_late_indicator = "🟡 Due Date Error"
+
+    summary_data.append({
+        "Order ID": order.get('order_id', key),
+        "Customer": order.get('customer', 'N/A'),
+        "Stage": stage,
+        "Priority": order.get('priority', 'N/A'),
+        "Product Type": order.get('product_type', 'N/A'),
+        "Quantity": order.get('qty', 'N/A'),
+        "Received": order.get('received', 'N/A').split('T')[0],
+        "Due Date": order.get('due', 'N/A').split('T')[0],
+        "Status": is_late_indicator,
+        "Total Cycle Time": total_order_cycle,
+    })
+
+summary_df = pd.DataFrame(summary_data)
+
+st.markdown("#### High-Level Order Summary")
+
+col_sum_1, col_sum_2 = st.columns([3, 1])
+
+with col_sum_2:
+    # ADDED: Download Report Button
+    csv_report = summary_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="⬇️ Download Filtered Report (CSV)",
+        data=csv_report,
+        file_name=f'filtered_orders_report_{datetime.now().strftime("%Y%m%d")}.csv',
+        mime='text/csv',
+        help="Download the currently visible table as a CSV file."
     )
 
-    # --- Summary Table ---
-    summary_data = []
-    for key, order in sorted_filtered_list:
-        stage = order.get('stage', 'N/A')
+with col_sum_1:
+    st.dataframe(
+        summary_df, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "Total Cycle Time": st.column_config.TextColumn(
+                "Total Cycle Time",
+                help="Time from order received to final completion/dispatch."
+            )
+        }
+    )
+
+st.divider()
+st.subheader("Individual Order Details")
+
+for key, order in sorted_filtered_list:
+    
+    stage = order.get('stage', 'N/A')
+    progress, _ = get_completion_info(stage)
+
+    total_order_cycle = ""
+    if stage == 'Completed':
+        total_order_cycle = calculate_stage_duration(order.get('received'), order.get('dispatched_at') or order.get('packing_completed_at'))
         
-        is_late_indicator = "🟢 On Time"
-        due_dt_raw = order.get('due')
-        total_order_cycle = 'In Progress'
+    expander_header = f"**{order.get('order_id', key)}** — {order.get('customer', 'N/A')} | **Stage:** `{stage}`"
+    if total_order_cycle:
+        expander_header += f" | **Total Time:** {total_order_cycle}"
 
-        # Recalculate late status and cycle time using the improved logic
-        if due_dt_raw:
-            try:
-                due_dt = datetime.fromisoformat(due_dt_raw)
-                completed_str = order.get('dispatched_at') or order.get('packing_completed_at')
-                
-                if stage == 'Completed' and completed_str:
-                    completed_dt = datetime.fromisoformat(completed_str)
-                    total_order_cycle = calculate_stage_duration(order.get('received'), completed_str)
-                    if completed_dt > due_dt:
-                        is_late_indicator = "🔴 Late"
-                elif datetime.now() > due_dt:
-                    is_late_indicator = "🟠 Past Due"
-            except:
-                is_late_indicator = "🟡 Due Date Error"
 
-        summary_data.append({
-            "Order ID": order.get('order_id', key),
-            "Customer": order.get('customer', 'N/A'),
-            "Stage": stage,
-            "Priority": order.get('priority', 'N/A'),
-            "Product Type": order.get('product_type', 'N/A'),
-            "Quantity": order.get('qty', 'N/A'),
-            "Received": order.get('received', 'N/A').split('T')[0],
-            "Due Date": order.get('due', 'N/A').split('T')[0],
-            "Status": is_late_indicator,
-            "Total Cycle Time": total_order_cycle,
-        })
+    with st.expander(expander_header):
 
-    summary_df = pd.DataFrame(summary_data)
-    
-    st.markdown("#### High-Level Order Summary")
-    
-    col_sum_1, col_sum_2 = st.columns([3, 1])
-    
-    with col_sum_2:
-        # ADDED: Download Report Button
-        csv_report = summary_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="⬇️ Download Filtered Report (CSV)",
-            data=csv_report,
-            file_name=f'filtered_orders_report_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-            help="Download the currently visible table as a CSV file."
-        )
-
-    with col_sum_1:
-        st.dataframe(
-            summary_df, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "Total Cycle Time": st.column_config.TextColumn(
-                    "Total Cycle Time",
-                    help="Time from order received to final completion/dispatch."
-                )
-            }
-        )
-
-    st.divider()
-    st.subheader("Individual Order Details")
-
-    # [REMAINDER OF ORIGINAL CODE FOR INDIVIDUAL ORDER DISPLAY]
-    for key, order in sorted_filtered_list:
+        st.progress(progress, text=f"Overall Completion Progress: **{progress*100:.0f}%**")
         
-        stage = order.get('stage', 'N/A')
-        progress, _ = get_completion_info(stage)
+        col_meta, col_dates = st.columns([1, 1])
 
-        # Calculate total cycle time for the order being viewed (if completed)
-        total_order_cycle = ""
-        if stage == 'Completed':
-            total_order_cycle = calculate_stage_duration(order.get('received'), order.get('dispatched_at') or order.get('packing_completed_at'))
-            
-        # Expander Header
-        expander_header = f"**{order['order_id']}** — {order.get('customer', 'N/A')} | **Stage:** `{stage}`"
-        if total_order_cycle:
-            expander_header += f" | **Total Time:** {total_order_cycle}"
+        with col_meta:
+            st.markdown("### Order Details")
+            st.write(f"**Product Type:** {order.get('product_type', 'N/A')}")
+            st.write(f"**Priority:** {order.get('priority', 'N/A')}")
+            st.write(f"**Item:** {order.get('item', 'N/A')}")
+            st.write(f"**Quantity:** {order.get('qty', 'N/A')}")
 
-
-        with st.expander(expander_header):
-
-            st.progress(progress, text=f"Overall Completion Progress: **{progress*100:.0f}%**")
-            
-            col_meta, col_dates = st.columns([1, 1])
-
-            with col_meta:
-                st.markdown("### Order Details")
-                st.write(f"**Product Type:** {order.get('product_type', 'N/A')}")
-                st.write(f"**Priority:** {order.get('priority', 'N/A')}")
-                st.write(f"**Item:** {order.get('item', 'N/A')}")
-                st.write(f"**Quantity:** {order.get('qty', 'N/A')}")
-
-            with col_dates:
-                st.markdown("### Key Timelines")
-                st.write(f"**Order Received:** {order.get('received', 'N/A').split('T')[0]}")
-                st.write(f"**Due Date:** {order.get('due', 'N/A').split('T')[0]}")
-                st.write(f"**Current Stage:** `{stage}`")
+        with col_dates:
+            st.markdown("### Key Timelines")
+            st.write(f"**Order Received:** {order.get('received', 'N/A').split('T')[0]}")
+            st.write(f"**Due Date:** {order.get('due', 'N/A').split('T')[0]}")
+            st.write(f"**Current Stage:** `{stage}`")
 
 
-            st.divider()
+        st.divider()
 
-            st.markdown("### Specs")
-            st.write(f"Foil ID: {order.get('foil_id', 'N/A')}")
-            st.write(f"Spot UV ID: {order.get('spotuv_id', 'N/A')}")
-            st.write(f"Brand Thickness: {order.get('brand_thickness_id', 'N/A')}")
-            st.write(f"Paper Thickness: {order.get('paper_thickness_id', 'N/A')}")
-            st.write(f"Size: {order.get('size_id', 'N/A')}")
-            st.write(f"Rate: {order.get('rate', 'N/A')}")
+        st.markdown("### Specs")
+        st.write(f"Foil ID: {order.get('foil_id', 'N/A')}")
+        st.write(f"Spot UV ID: {order.get('spotuv_id', 'N/A')}")
+        st.write(f"Brand Thickness: {order.get('brand_thickness_id', 'N/A')}")
+        st.write(f"Paper Thickness: {order.get('paper_thickness_id', 'N/A')}")
+        st.write(f"Size: {order.get('size_id', 'N/A')}")
+        st.write(f"Rate: {order.get('rate', 'N/A')}")
 
-            st.divider()
+        st.divider()
 
-            st.markdown("### Workflow Duration & Timestamps")
-            
-            # Calculate durations
-            design_duration = calculate_stage_duration(order.get('started_at'), order.get('design_completed_at'))
-            printing_duration = calculate_stage_duration(order.get('printing_started_at'), order.get('printing_completed_at'))
-            diecut_duration = calculate_stage_duration(order.get('diecut_started_at'), order.get('diecut_completed_at'))
-            assembly_duration = calculate_stage_duration(order.get('assembly_started_at'), order.get('assembly_completed_at'))
-            packing_duration = calculate_stage_duration(order.get('packing_start'), order.get('packing_completed_at'))
-
-            col_duration, col_timestamps = st.columns(2)
-
-            with col_duration:
-                st.markdown("#### Stage Durations")
-                st.markdown(f"**Design:** {design_duration}")
-                st.markdown(f"**Printing:** {printing_duration}")
-                st.markdown(f"**DieCut:** {diecut_duration}")
-                st.markdown(f"**Assembly:** {assembly_duration}")
-                st.markdown(f"**Packing:** {packing_duration}")
-
-            with col_timestamps:
-                st.markdown("#### Key Timestamps")
-                st.json({
-                    "next_after_printing": order.get("next_after_printing", "N/A"),
-                    "design_completed": order.get("design_completed_at", "N/A"),
-                    "printing_completed": order.get("printing_completed_at", "N/A"),
-                    "diecut_completed": order.get("diecut_completed_at", "N/A"),
-                    "assembly_completed": order.get("assembly_completed_at", "N/A"),
-                    "packing_completed": order.get("packing_completed_at", "N/A"),
-                    "dispatched_at": order.get("dispatched_at", "N/A"),
-                })
-
-    st.divider()
-    
-    # -------------------------------------
-    # DANGER ZONE (Delete All Orders)
-    # -------------------------------------
-    st.subheader("⚠️ Danger Zone: Administrative Actions")
-    
-    if st.session_state["role"] == "admin":
-        st.warning("This action will **PERMANENTLY DELETE ALL ORDERS** in your database. Use with extreme caution.")
-        delete_col, _ = st.columns([1, 4])
+        st.markdown("### Workflow Duration & Timestamps")
         
-        with delete_col:
-            delete_confirmation = st.checkbox("I understand and want to permanently delete ALL orders.")
-            
-            if delete_confirmation:
-                if st.button("🔴 Permanently Delete ALL Orders", type="primary"):
-                    st.error("Functionality requires 'write' access and a specific Firebase write operation which is NOT included in this code for safety. The action would execute Firebase's `delete('orders')` if implemented.")
-                    # Placeholder for actual delete operation
-                    # from firebase import delete
-                    # delete("orders") 
-                    # st.success("✅ All orders deleted successfully. Refreshing page...")
-                    # st.cache_data.clear() # Clear cache after delete
-                    # st.rerun()
+        # Calculate durations
+        design_duration = calculate_stage_duration(order.get('started_at'), order.get('design_completed_at'))
+        printing_duration = calculate_stage_duration(order.get('printing_started_at'), order.get('printing_completed_at'))
+        diecut_duration = calculate_stage_duration(order.get('diecut_started_at'), order.get('diecut_completed_at'))
+        assembly_duration = calculate_stage_duration(order.get('assembly_started_at'), order.get('assembly_completed_at'))
+        packing_duration = calculate_stage_duration(order.get('packing_start'), order.get('packing_completed_at'))
+
+        col_duration, col_timestamps = st.columns(2)
+
+        with col_duration:
+            st.markdown("#### Stage Durations")
+            st.markdown(f"**Design:** {design_duration}")
+            st.markdown(f"**Printing:** {printing_duration}")
+            st.markdown(f"**DieCut:** {diecut_duration}")
+            st.markdown(f"**Assembly:** {assembly_duration}")
+            st.markdown(f"**Packing:** {packing_duration}")
+
+        with col_timestamps:
+            st.markdown("#### Key Timestamps")
+            st.json({
+                "next_after_printing": order.get("next_after_printing", "N/A"),
+                "design_completed": order.get("design_completed_at", "N/A"),
+                "printing_completed": order.get("printing_completed_at", "N/A"),
+                "diecut_completed": order.get("diecut_completed_at", "N/A"),
+                "assembly_completed": order.get("assembly_completed_at", "N/A"),
+                "packing_completed": order.get("packing_completed_at", "N/A"),
+                "dispatched_at": order.get("dispatched_at", "N/A"),
+            })
+
+st.divider()
+
+# -------------------------------------
+## ⚠️ Danger Zone: Administrative Actions (Delete Feature)
+# -------------------------------------
+st.subheader("⚠️ Danger Zone: Administrative Actions")
+
+if st.session_state["role"] == "admin":
+    st.warning("This action will **PERMANENTLY DELETE ALL ORDERS** in your database. Use with extreme caution.")
+    delete_col, _ = st.columns([1, 4])
+    
+    with delete_col:
+        delete_confirmation = st.checkbox("I understand and want to permanently delete ALL orders.")
+        
+        if delete_confirmation:
+            if st.button("🔴 Permanently Delete ALL Orders", type="primary"):
+                st.error("Functionality requires 'write' access and a specific Firebase write operation which is NOT included in this code for safety. The action would execute Firebase's `delete('orders')` if implemented.")
+                # Placeholder for actual delete operation:
+                # from firebase import delete
+                # delete("orders") 
+                # st.success("✅ All orders deleted successfully. Refreshing page...")
+                # st.cache_data.clear() # Clear cache after delete
+                # st.rerun()
