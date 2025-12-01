@@ -1,6 +1,11 @@
 import streamlit as st
 import os
 from firebase import read
+# --- FCM / Firebase Notification Imports ---
+from firebase import update, read
+import firebase_admin
+from firebase_admin import credentials, db
+import base64
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(
@@ -8,6 +13,18 @@ st.set_page_config(
     layout="wide", 
     initial_sidebar_state="collapsed" 
 )
+# --------------------------------------------------------
+# 🔔 ROUTE: Receive FCM token from frontend (admin only)
+# --------------------------------------------------------
+try:
+    params = st.experimental_get_query_params()
+    if "upload_admin_token" in params:
+        raw = st.request.body.decode()
+        update("admin_tokens", {"token": raw})
+        st.write("Token saved")
+        st.stop()
+except Exception as e:
+    pass
 
 # --- Constants ---
 DEFAULT_ADMIN = {
