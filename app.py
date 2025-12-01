@@ -10,30 +10,27 @@ st.set_page_config(page_title="OMS Dashboard", layout="wide")
 # LOGIN CHECK
 # ----------------------------------------
 if "role" not in st.session_state:
-    st.switch_page("login.py")
+    # Load login.py manually (not switch_page)
+    with open("login.py", "r") as f:
+        exec(f.read())
+    st.stop()
 
 role = st.session_state["role"]
 username = st.session_state["username"]
 
 # ----------------------------------------
-# UNIVERSAL SIDEBAR REMOVAL (WORKS 100%)
+# REMOVE SIDEBAR IF NOT ADMIN
 # ----------------------------------------
 if role != "admin":
     st.markdown("""
         <style>
-            /* Hide ALL possible sidebars */
             aside, nav, section[aria-label="sidebar"],
             [data-testid="stSidebar"], [data-testid="stSidebarNav"],
-            [data-testid="collapsedControl"],
-            button[kind="header"],
-            div[class*="sidebar"], div[id*="sidebar"] {
+            [data-testid="collapsedControl"], button[kind="header"] {
                 display: none !important;
                 visibility: hidden !important;
-                width: 0 !important;
-                min-width: 0 !important;
             }
 
-            /* Full width layout */
             [data-testid="stAppViewContainer"] {
                 margin-left: 0 !important;
                 padding-left: 1rem !important;
@@ -43,20 +40,18 @@ if role != "admin":
     """, unsafe_allow_html=True)
 
 # ----------------------------------------
-# PAGE LOADER
+# PAGE LOADER FUNCTION
 # ----------------------------------------
-def load_page(file_path):
-    """Load a page by executing its Python file."""
-    full_path = os.path.join("modules", file_path)
+def load_page(file):
+    full_path = os.path.join("modules", file)
     if os.path.exists(full_path):
         with open(full_path, "r") as f:
-            code = compile(f.read(), full_path, 'exec')
-            exec(code, globals())
+            exec(f.read(), globals())
     else:
-        st.error(f"Page not found: {file_path}")
+        st.error(f"Page not found: {file}")
 
 # ----------------------------------------
-# TITLE
+# HEADER
 # ----------------------------------------
 st.title("📦 Order Management System")
 st.caption(f"Logged in as **{username}** | Role: {role}")
@@ -82,17 +77,17 @@ admin_pages = {
 }
 
 # ----------------------------------------
-# ADMIN → CUSTOM SIDEBAR
+# ADMIN → SIDEBAR NAV
 # ----------------------------------------
 if role == "admin":
     choice = st.sidebar.selectbox("Navigate", list(admin_pages.keys()))
     load_page(admin_pages[choice])
 
 # ----------------------------------------
-# NON-ADMIN → AUTO-REDIRECT TO THEIR PAGE
+# NON-ADMIN → AUTO LOAD THEIR PAGE
 # ----------------------------------------
 else:
     if role in role_pages:
         load_page(role_pages[role])
     else:
-        st.error("Your role has no assigned page. Contact admin.")
+        st.error("No page assigned to your role.")
