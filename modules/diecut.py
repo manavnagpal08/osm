@@ -1,7 +1,7 @@
 import streamlit as st
 from firebase import read, update
 import base64
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, Dict
 
 # ---------------------------------------------------
@@ -130,6 +130,11 @@ def preview(label: str, b64: Optional[str], order_id: str):
 def generate_diecut_slip(order, machine, blade, assign_to, die_paper, die_board,
                          cut_per_sheet, cut_per_board, total_sheets, total_boards, notes):
 
+    # Calculate current time in IST (UTC + 5:30) and format it.
+    IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
+    # Get current UTC time, localize it to IST offset, and format
+    now_ist = datetime.now(timezone.utc).astimezone(IST_OFFSET).strftime('%Y-%m-%d %H:%M IST')
+
     lines = [
         "DIE-CUT DEPARTMENT – JOB SLIP",
         "=============================",
@@ -157,7 +162,7 @@ def generate_diecut_slip(order, machine, blade, assign_to, die_paper, die_board,
         "--- NOTES ---",
         notes or "No special notes.",
         "",
-        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"Generated At: {now_ist}"
     ]
 
     def esc(s):  # Escape brackets
@@ -174,140 +179,6 @@ def generate_diecut_slip(order, machine, blade, assign_to, die_paper, die_board,
     for ln in lines:
         # Move down for the next line
         pdf_text += f"({esc(ln)}) Tj\n0 -{line_height} Td\n" 
-    pdf_text += "ET"
-
-    # The PDF structure needs to be fully compliant for reliable rendering
-    pdf = f"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R
-/MediaBox [0 0 612 792]
-/Resources << /Font << /F1 5 0 R >> >>
-/Contents 4 0 R
->>
-endobj
-4 0 obj
-<< /Length {len(pdf_text.encode('utf-8'))} >>
-stream
-{pdf_text}
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
-endobj
-xref
-0 6
-0000000000 65535 f
-0000000010 00000 n
-0000000078 00000 n
-0000000147 00000 n
-0000000331 00000 n
-0000000595 00000 n
-trailer << /Root 1 0 R /Size 6 >>
-startxref
-{618 + len(pdf_text.encode('utf-8'))} 
-%%EOF
-"""
-    # The startxref value needs to be dynamically calculated to point to the correct offset.
-    # Recalculate startxref dynamically:
-    
-    # Static part of the PDF structure length (up to endobj 5 0)
-    # 1 0 obj: 68 bytes
-    # 2 0 obj: 69 bytes
-    # 3 0 obj: 184 bytes
-    # 5 0 obj: 61 bytes
-    # xref + trailer header: ~ 23 bytes
-    
-    # We'll use a safer method: finding the starting byte for 'trailer'
-    # Start of object 4 0 obj (before length):
-    obj4_start = 331 
-    # Length of stream content (pdf_text) + 2 (for \n) + 'stream'/'endstream' overhead
-    stream_length = len(pdf_text.encode('utf-8'))
-    # startxref is the byte position of 'trailer'
-    startxref_pos = obj4_start + len(f"<< /Length {stream_length} >>\nstream\n{pdf_text}\nendstream\nendobj\n")
-    
-    
-    # Final PDF Structure with corrected xref values
-    pdf_template = f"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R
-/MediaBox [0 0 612 792]
-/Resources << /Font << /F1 5 0 R >> >>
-/Contents 4 0 R
->>
-endobj
-4 0 obj
-<< /Length {len(pdf_text.encode('utf-8'))} >>
-stream
-{pdf_text}
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
-endobj
-xref
-0 6
-0000000000 65535 f
-0000000010 00000 n
-0000000078 00000 n
-0000000147 00000 n
-0000000331 00000 n
-0000000331 00000 n
-trailer << /Root 1 0 R /Size 6 >>
-startxref
-{startxref_pos}
-%%EOF
-"""
-    # Recalculate offsets for safety in the actual code
-    # This pure-python PDF generation is notoriously tricky due to byte offsets.
-    # Since the original code provided a PDF string, I'll stick to a slightly modified version
-    # of that structure but ensure the string interpolation is correct, especially for the calculated counts.
-
-    # Re-using original calculation path for simplicity, fixing the total counts string interpolation
-    lines = [
-        "DIE-CUT DEPARTMENT – JOB SLIP",
-        "=============================",
-        "",
-        f"Order ID: {order.get('order_id')}",
-        f"Customer: {order.get('customer')}",
-        f"Item: {order.get('item')}",
-        "",
-        f"--- EQUIPMENT & ASSIGNMENT ---",
-        f"Machine: {machine or 'N/A'}",
-        f"Blade Type: {blade or 'N/A'}",
-        f"Assigned To: {assign_to or 'Unassigned'}",
-        "",
-        f"--- DIE NUMBERS ---",
-        f"Die Number (Paper): {die_paper or 'N/A'}",
-        f"Die Number (Board): {die_board or 'N/A'}",
-        "",
-        f"--- PRODUCTION COUNTS ---",
-        f"Paper Cut Per Sheet: {cut_per_sheet}",
-        f"Board Cut Per Die: {cut_per_board}",
-        "",
-        f"Total Paper Sheets Needed: {total_sheets:,}", # Formatting change
-        f"Total Boards Needed: {total_boards:,}", # Formatting change
-        "",
-        "--- NOTES ---",
-        notes or "No special notes.",
-        "",
-        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    ]
-    
-    pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
-    for ln in lines:
-        pdf_text += f"({esc(ln)}) Tj\n0 -18 Td\n"
     pdf_text += "ET"
 
     # PDF Structure (Simple Text/Courier Font) - original structure retained
@@ -592,7 +463,7 @@ with tab1:
                 if is_ready:
                     if st.button("🚀 Move to Assembly", key=f"move_{order_id}", type="primary", use_container_width=True):
                         update(f"orders/{key}", {
-                            "stage": "Assembly", # CHANGED FROM Lamination TO Assembly
+                            "stage": "Assembly", 
                             "diecut_completed_at": datetime.now().isoformat()
                         })
                         st.balloons()
