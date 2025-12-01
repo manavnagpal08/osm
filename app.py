@@ -6,28 +6,16 @@ import json
 # FIREBASE MODULE ACCESS & INITIALIZATION
 # ----------------------------------------
 
-# Since standard imports and locals().get() are failing, we explicitly use 
-# st.globals.get() to access functions injected by the environment.
-
+# We remove the failing st.globals.get() calls. We rely on the environment 
+# to make these functions available, and we use a simple try/except block 
+# to catch the ultimate failure if they are not defined.
 try:
-    initializeApp = st.globals.get('initializeApp')
-    getFirestore = st.globals.get('getFirestore')
-    collection = st.globals.get('collection')
-    doc = st.globals.get('doc')
-    getDoc = st.globals.get('getDoc')
-    getAuth = st.globals.get('getAuth')
-    signInWithCustomToken = st.globals.get('signInWithCustomToken')
-    signInAnonymously = st.globals.get('signInAnonymously')
-    
-    # Check if critical functions are present
-    if not (initializeApp and getFirestore and getAuth):
-        # Fallback to a standard import if st.globals failed, just in case
-        from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth, signInWithCustomToken, signInAnonymously
-        # If the import succeeds, we can proceed.
-    
-except Exception as e:
-    # This catches both the ImportError fallback and the initial check if functions are None
-    st.error(f"FATAL ERROR: Essential Firebase SDK functions are unavailable (Attempted all access methods): {e}")
+    from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth
+    # Note: signInWithCustomToken and signInAnonymously are not needed in this
+    # main router file, as authentication is assumed to be handled before execution.
+except ImportError as e:
+    # If the standard import fails, Firebase functions are definitively unavailable.
+    st.error(f"FATAL ERROR: Essential Firebase SDK functions are unavailable. Import failed: {e}")
     st.stop()
 
 
@@ -41,7 +29,7 @@ except json.JSONDecodeError:
     st.error("Configuration error: Invalid Firebase config JSON in app.py.")
     st.stop()
 
-# Initialize if not already initialized by the preceding script (login.py)
+# Initialize Firebase App and Firestore DB
 try:
     # We explicitly try to re-initialize here to ensure db/app references are set for this script.
     app = initializeApp(firebaseConfig)
