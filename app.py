@@ -6,25 +6,17 @@ import json
 # FIREBASE MODULE ACCESS & INITIALIZATION
 # ----------------------------------------
 
-# We must ensure the Firebase SDK functions are available and initialized, 
-# as this file will be executed after a successful login (from login.py)
+# The environment is expected to load these functions. If they are not found
+# in globals (or via st.globals), the standard Python import should work 
+# if the wrapper module is present. We simplify to rely on the standard import 
+# provided by the Canvas environment.
 
 try:
-    # Check for required functions in globals and assign them.
-    initializeApp = st.globals.get('initializeApp')
-    getFirestore = st.globals.get('getFirestore')
-    collection = st.globals.get('collection')
-    doc = st.globals.get('doc')
-    getDoc = st.globals.get('getDoc')
-    # Note: 'update' function will be replaced by setDoc/updateDoc
-    
-    if not initializeApp:
-        # Fallback for environments where st.globals isn't the primary access method
-        from firebase import initializeApp, getFirestore, collection, doc, getDoc 
-
-except Exception:
-    # If standard imports also fail, we must assume the environment is not ready
-    st.error("FATAL ERROR: Essential Firebase SDK functions (getFirestore, etc.) are unavailable.")
+    from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth, signInWithCustomToken, signInAnonymously
+except ImportError as e:
+    # If the environment failed to provide the 'firebase' module entirely, 
+    # we raise a clear error.
+    st.error(f"FATAL ERROR: Failed to import essential Firebase SDK functions: {e}")
     st.stop()
 
 
@@ -40,6 +32,7 @@ except json.JSONDecodeError:
 
 # Initialize if not already initialized by the preceding script (login.py)
 try:
+    # We explicitly try to re-initialize here to ensure db/app references are set for this script.
     app = initializeApp(firebaseConfig)
     db = getFirestore(app)
 except Exception as e:
