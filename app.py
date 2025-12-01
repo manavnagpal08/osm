@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit as st
 from packaging import version
 
 # ----------------------------------------
@@ -16,75 +15,62 @@ if "role" not in st.session_state:
 role = st.session_state["role"]
 
 # ----------------------------------------
-# CHECK STREAMLIT VERSION FOR SIDEBAR SUPPORT
-# ----------------------------------------
-current_ver = version.parse(st.__version__)
-can_hide_sidebar = current_ver >= version.parse("1.25.0")  # Sidebar CSS works from v1.25+
-
-# ----------------------------------------
-# HIDE SIDEBAR FOR NON-ADMIN (WITH FALLBACK)
+# UNIVERSAL SIDEBAR DISABLER (WORKS ALWAYS)
 # ----------------------------------------
 if role != "admin":
+    st.markdown("""
+        <style>
 
-    if can_hide_sidebar:
-        # Try to hide using CSS
-        st.markdown("""
-            <style>
+        /* REMOVE ASIDE COMPLETELY (NEW STREAMLIT) */
+        aside, nav, section[aria-label="sidebar"] {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            min-width: 0 !important;
+        }
 
-            /* Old Sidebar */
-            [data-testid="stSidebar"] {display: none !important;}
-            [data-testid="stSidebarNav"] {display: none !important;}
+        /* TARGET ANY POSSIBLE SIDEBAR WRAPPER */
+        [id*="__sidebar__"],
+        [class*="sidebar"],
+        [data-testid*="sidebar"],
+        [data-testid*="stSidebar"],
+        div[id*="stSidebar"],
+        div[class*="stSidebar"],
+        div:has(nav[aria-label="Sidebar"]) {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+        }
 
-            /* New Sidebar (v1.36+) */
-            section[data-testid="stSidebar"] {display: none !important;}
-            div[data-testid="stSidebar"] {display: none !important;}
+        /* REMOVE THE HAMBURGER MENU ALWAYS */
+        button[kind="header"],
+        [data-testid="collapsedControl"],
+        [title="Toggle sidebar"] {
+            display: none !important;
+            visibility: hidden !important;
+        }
 
-            /* Emotion-cache wrappers */
-            div[class*="st-emotion-cache"][class*="sidebar"] {display: none !important;}
-            aside[class*="sidebar"] {display: none !important;}
+        /* FORCE FULL WIDTH ALWAYS */
+        .block-container, [data-testid="stAppViewContainer"] {
+            max-width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            margin-left: 0 !important;
+        }
 
-            /* Collapsed control */
-            [data-testid="collapsedControl"] {display: none !important;}
-
-            /* Hamburger */
-            button[kind="header"] {display: none !important;}
-
-            /* Full width */
-            [data-testid="stAppViewContainer"] {
-                margin-left: 0 !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
-    else:
-        # ----------------------------------------
-        # FALLBACK MODE (STREAMLIT TOO OLD)
-        # Force full-screen view so sidebar disappears automatically
-        # ----------------------------------------
-        st.markdown("""
-            <style>
-                /* Make main container full width */
-                [data-testid="stAppViewContainer"] {
-                    margin-left: 0 !important;
-                    width: 100% !important;
-                }
-
-                /* Hide hamburger & collapsed icons */
-                button[kind="header"] {display: none !important;}
-                [data-testid="collapsedControl"] {display: none !important;}
-            </style>
-        """, unsafe_allow_html=True)
+        </style>
+    """, unsafe_allow_html=True)
 
 # ----------------------------------------
-# TITLE & USER INFO
+# TITLE & ROLE
 # ----------------------------------------
 st.title("📦 Order Management System")
-st.caption(f"Logged in as **{st.session_state['username']}** | Role: {role} | Streamlit {st.__version__} detected")
+st.caption(f"Logged in as **{st.session_state['username']}** | Role: {role}")
 
 # ----------------------------------------
-# ROLE → PAGE MAPPING
+# PAGE MAPPING
 # ----------------------------------------
 pages = {}
 
@@ -105,17 +91,17 @@ if role in ["admin", "dispatch"]:
     pages["Dispatch Dept"] = "pages/dispatch.py"
 
 # ----------------------------------------
-# ADMIN: SHOW SIDEBAR
+# ADMIN – SHOW SIDEBAR
 # ----------------------------------------
 if role == "admin":
     choice = st.sidebar.selectbox("Navigate", list(pages.keys()))
     st.switch_page(pages[choice])
 
 # ----------------------------------------
-# NON-ADMIN → AUTO-REDIRECT
+# NON ADMIN – AUTO REDIRECT
 # ----------------------------------------
 else:
     if len(pages) == 1:
         st.switch_page(list(pages.values())[0])
     else:
-        st.error("No page assigned to your role. Contact admin.")
+        st.error("No page assigned to your role.")
