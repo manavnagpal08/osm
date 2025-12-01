@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+# Assuming 'firebase' module handles connection (read, update, delete)
 from firebase import read, update, delete 
 from datetime import datetime, timezone, date, timedelta
 import time
@@ -28,6 +29,7 @@ def to_datetime_utc(x):
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
+        # Return None or a known invalid value if conversion fails
         return None
 
 def calculate_priority_score(row):
@@ -36,12 +38,12 @@ def calculate_priority_score(row):
     Higher score means more critical.
     """
     score_map = {"High": 3, "Medium": 2, "Low": 1}
-    base_score = score_map.get(row['priority'], 1)
+    base_score = score_map.get(row.get('priority', 'Low'), 1)
     
+    # Use .get() and provide a safe default value if the column is missing/empty
     time_to_deadline = row.get('Time_To_Deadline', 100)
     
     if time_to_deadline < 0:
-        # Penalize heavily for each day overdue
         modifier = 100 + abs(time_to_deadline) * 5 
     elif time_to_deadline <= 3:
         modifier = (3 - time_to_deadline) * 2
@@ -83,7 +85,7 @@ if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS 
+# LOAD & PRE-PROCESS ORDERS (The source of the error is stabilized here)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -125,9 +127,13 @@ def load_and_process_orders():
     
     for key in all_time_keys:
         if key in df.columns:
+            # Errors='coerce' converts bad strings to pd.NaT
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
+        else:
+            # Add missing timestamp columns filled with NaT to prevent key errors later
+            df[key] = pd.NaT 
 
-    # Prepare columns for the data_editor 
+    # Prepare columns for the display 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
     # Convert Timestamp to a Python date object for display compatibility
@@ -136,7 +142,8 @@ def load_and_process_orders():
     # --- Advanced Metric: Time to Deadline ---
     current_time = datetime.now(timezone.utc)
     time_delta = df['due'] - current_time
-    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) # Days
+    # Safely convert timedelta to days, coercing errors to NaT, then filling NaT for score calc
+    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1).fillna(100) 
 
     # --- Advanced Feature: Priority Score ---
     df['Priority_Score'] = df.apply(calculate_priority_score, axis=1)
@@ -149,11 +156,17 @@ def load_and_process_orders():
         end_col = stage_times.get(production_stages[i])
 
         if start_col in df.columns and end_col in df.columns:
+            # CRITICAL FIX: Ensure NaT handling in subtraction. Result is Timedelta or NaT.
             duration_timedelta = (df[end_col] - df[start_col])
+            # The .dt accessor is safe here because duration_timedelta is guaranteed to be timedelta64[ns]
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
 
+    # Final step: Ensure the Firebase ID column exists, as it is needed for other functions
+    if 'firebase_id' not in df.columns:
+         df['firebase_id'] = np.nan
+        
     return df, stage_times, production_stages
 
 
@@ -173,13 +186,13 @@ if df.empty:
 ## 🎯 Key Performance Indicators
 col1, col2, col3, col4, col5 = st.columns(5)
 
-col1.metric("Total Orders", len(df))
-col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
-col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
+col1.metric("**Total Orders**", len(df))
+col2.metric("**Completed Orders**", len(df[df["stage"] == "Completed"]))
+col3.metric("**Active Orders**", len(df[df["stage"] != "Completed"]), 
             delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
 orders_this_month = len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")])
-col4.metric("Orders This Month", orders_this_month) 
-col5.metric("Avg Priority Score", f"{df['Priority_Score'].mean():.1f}")
+col4.metric("**Orders This Month**", orders_this_month) 
+col5.metric("**Avg Priority Score**", f"{df['Priority_Score'].mean():.1f}")
 
 st.markdown("---")
 
@@ -246,7 +259,6 @@ with tab1:
         df_display,
         hide_index=True,
         use_container_width=True,
-        # Removed the error-causing 'column_styler' argument
     )
 
 # Tab 2: Pending Orders (Not completed or dispatched)
