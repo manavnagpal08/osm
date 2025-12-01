@@ -43,7 +43,8 @@ def calculate_priority_score(row):
     
     # Modifier: If overdue (negative days), greatly increase score.
     if time_to_deadline < 0:
-        modifier = 100 - time_to_deadline # Adds a large positive number
+        # Penalize heavily for each day overdue
+        modifier = 100 + abs(time_to_deadline) * 5 
     # If deadline is within 3 days, slightly increase score
     elif time_to_deadline <= 3:
         modifier = (3 - time_to_deadline) * 2
@@ -85,7 +86,7 @@ if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (Fixes for all data type issues)
+# LOAD & PRE-PROCESS ORDERS 
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -95,7 +96,7 @@ def load_and_process_orders():
     data = []
     for key, o in orders.items():
         if isinstance(o, dict):
-            o["firebase_id"] = key # Keep this ID for updates later
+            o["firebase_id"] = key 
             if 'qty' not in o or o['qty'] is None:
                 o['qty'] = 0 
             data.append(o)
@@ -141,7 +142,6 @@ def load_and_process_orders():
     df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) # Days
 
     # --- NEW Advanced Feature: Priority Score ---
-    # Apply before calculating stage duration, as we need the 'priority' column
     df['Priority_Score'] = df.apply(calculate_priority_score, axis=1)
 
     # Calculate Time-In-Stage
@@ -225,10 +225,9 @@ if df_filtered.empty:
 st.markdown("## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)")
 
 # Select columns for display and editing
-# ⭐ Removed "firebase_id" from the display list
 df_display = df_filtered[[
     "order_id", "customer", "customer_phone", "item", "Qty", 
-    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score", "firebase_id" # Keep firebase_id in the DataFrame passed to data_editor but hide it
+    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score", "firebase_id"
 ]].rename(columns={
     "customer_phone": "Phone",
     "order_id": "Order ID",
@@ -237,11 +236,17 @@ df_display = df_filtered[[
     "stage": "Stage",
     "priority": "Priority",
     "Time_To_Deadline": "Deadline (Days)",
-    "Priority_Score": "Score", # Display the new score
-    "firebase_id": "Firebase ID"
+    "Priority_Score": "Score",
+    "firebase_id": "Firebase ID" # Keep this rename for update logic clarity
 })
 
+# **CRITICAL FIX:** Drop the Firebase ID column from the DataFrame displayed in the editor
+# but keep the original index and all other columns.
+df_display_for_editor = df_display.drop(columns=["Firebase ID"])
+
+
 # Define the data editor configuration for inline editing
+# This config only includes the columns that are VISIBLE in df_display_for_editor
 column_config = {
     "Order ID": st.column_config.TextColumn("Order ID", disabled=True),
     "Customer": st.column_config.TextColumn("Customer Name", required=True),
@@ -263,11 +268,11 @@ column_config = {
         format="%.1f",
         disabled=True
     ),
-    "Firebase ID": st.column_config.Column("Firebase ID", disabled=True, visible=False) # ⭐ HIDE FIREBASE ID
+    # The 'Firebase ID' column is no longer included in the config.
 }
 
-edited_df = st.data_editor(
-    df_display,
+edited_df_output = st.data_editor(
+    df_display_for_editor, # Pass the DataFrame *without* the Firebase ID
     column_config=column_config,
     hide_index=True,
     use_container_width=True,
@@ -281,42 +286,42 @@ if st.session_state.orders_data_editor['edited_rows']:
     
     edited_rows = st.session_state.orders_data_editor['edited_rows']
     
-    # ⭐ CRITICAL FIX: Loop through the positions, then use that position to look up the
-    # Firebase ID directly from the EDITED DataFrame which has the same positional structure.
-    for position, edits in edited_rows.items():
-        try:
-            # Safest way: Look up the Firebase ID in the edited_df at the row position
-            original_firebase_id = edited_df.iloc[position]['Firebase ID']
-            order_id_for_toast = edited_df.iloc[position]['Order ID']
-            
-            update_data = {}
-            
-            if 'Customer' in edits:
-                update_data['customer'] = edits['Customer']
-            if 'Phone' in edits:
-                update_data['customer_phone'] = edits['Phone']
-            if 'Qty' in edits:
-                update_data['qty'] = int(edits['Qty'])
-            if 'Priority' in edits:
-                update_data['priority'] = edits['Priority']
-            if 'Due_Date' in edits:
-                try:
-                    date_obj = edits['Due_Date']
-                    dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
-                    update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
-                except ValueError:
-                    st.error(f"Invalid date format for order {order_id_for_toast}. Date not updated.")
-                    continue
+    # CRITICAL FIX: Use the index of the original df_display (which *has* Firebase ID)
+    # to find the corresponding Firebase ID for the update.
+    original_indices = df_display_for_editor.iloc[list(edited_rows.keys())].index
 
-            if update_data:
-                update(f"orders/{original_firebase_id}", update_data)
-                st.toast(f"✅ Updated Order ID: {order_id_for_toast}", icon='💾')
-                
-        except IndexError:
-            # Handle the case where the index is still out of bounds (highly unlikely with this fix)
-            st.error("Error: Could not locate the original record for update. Please refresh.")
-            break 
+    for original_index_value in original_indices:
+        
+        # Safely locate the firebase_id and order_id using the original index value
+        original_firebase_id = df_display.loc[original_index_value, 'Firebase ID']
+        order_id_for_toast = df_display.loc[original_index_value, 'Order ID']
+        
+        # Get the row data from the edited output to apply changes
+        position = list(edited_rows.keys())[list(original_indices).index(original_index_value)]
+        edits = edited_rows[position]
+        
+        update_data = {}
+        
+        if 'Customer' in edits:
+            update_data['customer'] = edits['Customer']
+        if 'Phone' in edits:
+            update_data['customer_phone'] = edits['Phone']
+        if 'Qty' in edits:
+            update_data['qty'] = int(edits['Qty'])
+        if 'Priority' in edits:
+            update_data['priority'] = edits['Priority']
+        if 'Due_Date' in edits:
+            try:
+                date_obj = edits['Due_Date']
+                dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
+                update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
+            except ValueError:
+                st.error(f"Invalid date format for order {order_id_for_toast}. Date not updated.")
+                continue
 
+        if update_data:
+            update(f"orders/{original_firebase_id}", update_data)
+            st.toast(f"✅ Updated Order ID: {order_id_for_toast}", icon='💾')
 
     time.sleep(0.5) 
     st.session_state.orders_data_editor['edited_rows'] = {}
@@ -328,6 +333,7 @@ st.markdown("---")
 ## ⚡ Actions
 colA, colB = st.columns(2)
 
+# Export uses the full df_filtered data
 csv_export = df_filtered.to_csv(index=False).encode()
 colA.download_button(
     "📥 Export Filtered Data to CSV", csv_export, "orders_filtered_export.csv", "text/csv"
@@ -362,6 +368,7 @@ with col_an1:
         hole=.3
     )
     st.plotly_chart(fig_stage, use_container_width=True)
+
 
 # Monthly production
 with col_an2:
