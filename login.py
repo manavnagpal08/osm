@@ -1,5 +1,5 @@
 import streamlit as st
-from firebase import read  # your REST Firebase wrapper
+from firebase import read
 
 st.set_page_config(page_title="OMS Login", layout="centered")
 
@@ -16,42 +16,35 @@ st.markdown("""
 
 st.title("🔐 Login to OMS")
 
-# ----------------------------------------------------------
-# DEFAULT ADMIN USER (ALWAYS AVAILABLE)
-# You may modify this:
+# ----------------------------------------
+# DEFAULT ADMIN USER
+# ----------------------------------------
 DEFAULT_ADMIN = {
     "username": "admin",
     "password": "admin123",
     "role": "admin"
 }
-# ----------------------------------------------------------
-
 
 # ----------------------------------------
-# FETCH USER FROM FIREBASE
+# FETCH USER
 # ----------------------------------------
 def get_user(username):
-    """
-    Fetch a user from Firestore.
-    If not found and username==admin → use default admin.
-    """
-    # Try Firebase first
+    # Try Firebase
     doc = read("users", username)
     if doc:
         return doc
-    
-    # Fallback to built-in admin
+
+    # Fallback admin
     if username == DEFAULT_ADMIN["username"]:
         return DEFAULT_ADMIN
 
     return None
 
-
 # ----------------------------------------
-# IF ALREADY LOGGED IN → LOAD DASHBOARD
+# IF ALREADY LOGGED IN
 # ----------------------------------------
 if "role" in st.session_state:
-    with open("app.py", "r") as f:
+    with open("app.py") as f:
         exec(f.read())
     st.stop()
 
@@ -59,31 +52,27 @@ if "role" in st.session_state:
 # ----------------------------------------
 # LOGIN FORM
 # ----------------------------------------
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
+username = st.text_input("Username", value="", key="username_input")
+password = st.text_input("Password", type="password", value="", key="password_input")
 
 if st.button("Login"):
+    # FIX: strip spaces and check properly
+    if username.strip() == "" or password.strip() == "":
+        st.error("Please enter both username and password.")
+    else:
+        user = get_user(username.strip())
 
-    if not username or not password:
-        st.error("Please enter both fields.")
-        st.stop()
+        if not user:
+            st.error("User does not exist.")
+        elif user.get("password") != password.strip():
+            st.error("Incorrect password.")
+        else:
+            # SUCCESS LOGIN
+            st.session_state["username"] = username.strip()
+            st.session_state["role"] = user.get("role")
 
-    user = get_user(username)
+            st.success("Login successful!")
 
-    if not user:
-        st.error("User not found.")
-        st.stop()
-
-    if password != user.get("password"):
-        st.error("Incorrect password.")
-        st.stop()
-
-    # LOGIN SUCCESS
-    st.session_state["username"] = username
-    st.session_state["role"] = user.get("role")
-
-    st.success("Login successful!")
-
-    with open("app.py", "r") as f:
-        exec(f.read())
-    st.stop()
+            with open("app.py") as f:
+                exec(f.read())
+            st.stop()
