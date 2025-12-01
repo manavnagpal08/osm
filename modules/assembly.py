@@ -235,42 +235,61 @@ with tab1:
             # Display Priority
             col_priority.metric("Priority", o.get("priority", "Medium"), help="Job Priority")
             
-            # ---------------- DEADLINE WATCH ----------------
+            # ---------------- DEADLINE WATCH (Updated for non-ISO time format) ----------------
             start_design_out = o.get("printing_completed_at") or o.get("diecut_completed_at")
             
             status_text = "N/A (No previous stage completion time)"
             
             # Check if there is a completion time from a previous relevant stage
             if start_design_out:
+                
+                start_time = None
+                
                 try:
+                    # 1. Try ISO format (Standard format used when saving new data)
                     start_time = datetime.fromisoformat(start_design_out)
-                    
-                    # Ensure start_time is UTC aware for consistent calculation
-                    if start_time.tzinfo is None or start_time.tzinfo.utcoffset(start_time) is None:
-                        start_time = start_time.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    try:
+                        # 2. If ISO fails, try the non-standard format identified in the error: '01 Dec 2025, 04:52 PM'
+                        # Assume non-ISO time is IST (UTC+5:30) if timezone info is missing.
+                        start_time_naive = datetime.strptime(start_design_out, '%d %b %Y, %I:%M %p')
+                        IST = timezone(timedelta(hours=5, minutes=30))
+                        start_time = start_time_naive.replace(tzinfo=IST)
+                    except Exception as e2:
+                        # 3. If both fail, log the detailed error and show a warning
+                        col_status.warning("Cannot calculate deadline (Time Format Error)")
+                        status_text = "Error in time calculation"
+                        # Log the error and the problematic value for debugging
+                        st.exception(f"Order ID {order_id}: Failed to parse timestamp '{start_design_out}' using ISO or fallback. Error: {e2}") 
+                        
+                
+                if start_time:
+                    try:
+                        # Ensure start_time is UTC aware and converted to UTC for consistent calculation
+                        if start_time.tzinfo is None or start_time.tzinfo.utcoffset(start_time) is None:
+                            # If we parsed a naive datetime and failed to attach IST in the fallback, assume UTC
+                            start_time = start_time.replace(tzinfo=timezone.utc)
+                        else:
+                            # Convert to UTC for standardized calculation against 'now' (which is UTC)
+                            start_time = start_time.astimezone(timezone.utc)
 
-                    # Assembly is given 36 hours from the completion of the previous step
-                    deadline = start_time + timedelta(hours=36)
-                    now = datetime.now(timezone.utc) # Compare against current UTC time
-                    
-                    if now > deadline:
-                        remaining = now - deadline
-                        col_status.error(f"⛔ OVERDUE by {str(remaining).split('.')[0]}")
-                        status_text = f"OVERDUE: {str(remaining).split('.')[0]}"
-                    else:
-                        remaining = deadline - now
-                        col_status.success(f"🟢 Remaining: {str(remaining).split('.')[0]}")
-                        status_text = f"Remaining: {str(remaining).split('.')[0]}"
-                except ValueError as e:
-                    # Handle invalid datetime format
-                    col_status.warning("Cannot calculate deadline (Time Format Error)")
-                    status_text = "Error in time calculation"
-                    # Log the error and the problematic value for debugging
-                    st.exception(f"Order ID {order_id}: Failed to parse timestamp '{start_design_out}'. Error: {e}") 
-                except Exception:
-                    # Handle other potential errors
-                    col_status.warning("Cannot calculate deadline (Unknown Error)")
-                    status_text = "Error in time calculation"
+                        # Assembly is given 36 hours from the completion of the previous step
+                        deadline = start_time + timedelta(hours=36)
+                        now = datetime.now(timezone.utc) # Compare against current UTC time
+                        
+                        if now > deadline:
+                            remaining = now - deadline
+                            col_status.error(f"⛔ OVERDUE by {str(remaining).split('.')[0]}")
+                            status_text = f"OVERDUE: {str(remaining).split('.')[0]}"
+                        else:
+                            remaining = deadline - now
+                            col_status.success(f"🟢 Remaining: {str(remaining).split('.')[0]}")
+                            status_text = f"Remaining: {str(remaining).split('.')[0]}"
+                    except Exception as e:
+                        # Handle calculation-specific errors
+                        col_status.warning("Cannot calculate deadline (Unknown Error)")
+                        status_text = "Error in time calculation"
+                        st.exception(f"Order ID {order_id}: Deadline calculation failed. Error: {e}")
 
             col_status.caption(f"Time since previous stage completion: {status_text}")
             
