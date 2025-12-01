@@ -1,110 +1,16 @@
 import streamlit as st
 import os
+# Assuming 'firebase' is a custom module with a 'read' function
 from firebase import read
 
 # --- Streamlit Page Configuration ---
-# Use 'expanded' for a larger, default-open sidebar post-login
+# Set to 'collapsed' by default to handle non-admin users who shouldn't see it.
+# We will explicitly expand it for the admin later using CSS.
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
-    initial_sidebar_state="expanded" 
+    initial_sidebar_state="collapsed" 
 )
-
-# --- Custom CSS for Enhanced Sidebar UI ---
-# Injecting CSS for a modern, sticky, and colorful sidebar
-st.markdown("""
-<style>
-    /* 1. Global App Background and Font */
-    .stApp {
-        background-color: #f0f2f6; /* Light gray background */
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    /* 2. Login Screen Styling (Re-applied for consistency) */
-    /* Hide Sidebar and Menu until login is complete */
-    .stApp:has([data-testid="stSidebar"]) { 
-        background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-    }
-    .stApp:has([data-testid="stSidebar"]) [data-testid="stSidebar"], 
-    .stApp:has([data-testid="stSidebar"]) [data-testid="stToolbar"], 
-    .stApp:has([data-testid="stSidebar"]) [data-testid="stHeader"] {
-        display: none !important;
-    }
-
-    /* 3. Sidebar Container Styling */
-    [data-testid="stSidebar"] {
-        background-color: #ffffff; /* White background for the sidebar */
-        box-shadow: 2px 0 10px rgba(0,0,0,0.1); /* Subtle shadow for depth */
-        transition: width 0.3s ease-in-out;
-    }
-    
-    /* 4. Sidebar Header/Title Styling */
-    .sidebar-header {
-        padding: 20px 20px 10px 20px;
-        color: #1E90FF; /* Primary blue for title */
-        font-size: 24px;
-        font-weight: bold;
-        text-align: center;
-        border-bottom: 1px solid #e0e0e0;
-        margin-bottom: 15px;
-    }
-    
-    /* 5. Radio Button (Navigation) Styling */
-    /* Target the container of the radio buttons */
-    [data-testid="stSidebar"] .stRadio > div {
-        padding: 0 10px;
-    }
-
-    /* Style the labels (the actual menu items) */
-    [data-testid="stSidebar"] .stRadio label {
-        padding: 12px 15px;
-        margin-bottom: 5px;
-        border-radius: 8px;
-        transition: all 0.2s;
-        font-weight: 500;
-    }
-    
-    /* Hover state */
-    [data-testid="stSidebar"] .stRadio label:hover {
-        background-color: #f0f8ff; /* Light blue on hover */
-        color: #1E90FF;
-        cursor: pointer;
-    }
-
-    /* Selected/Checked state */
-    [data-testid="stSidebar"] .stRadio input:checked + div > span {
-        background-color: #1E90FF !important; /* Primary blue background for selected item */
-        color: white !important; /* White text for contrast */
-        border-radius: 8px;
-        font-weight: bold;
-        padding: 12px 15px;
-    }
-
-    /* Ensure the whole button area is clickable and styled */
-    [data-testid="stSidebar"] .stRadio label > span:nth-child(2) {
-        width: 100%; /* Make the label fill the space */
-    }
-    
-    /* 6. Logout Button Styling */
-    [data-testid="stSidebar"] .stButton button {
-        width: 90%;
-        margin: 15px 5%; /* Center the button */
-        background-color: #FF4B4B; /* Red for logout/warning */
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: background-color 0.2s;
-    }
-    [data-testid="stSidebar"] .stButton button:hover {
-        background-color: #CC0000;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 
 # --- Constants ---
 DEFAULT_ADMIN = {
@@ -130,8 +36,7 @@ def get_user(username):
         fb_user = read(f"users/{username}") 
         if isinstance(fb_user, dict) and "password" in fb_user and "role" in fb_user:
             return fb_user
-    except Exception as e:
-        # print(f"Firebase read error for user {username}: {e}")
+    except Exception:
         pass 
     if username == DEFAULT_ADMIN["username"]:
         return DEFAULT_ADMIN
@@ -162,13 +67,41 @@ def logout():
             del st.session_state[key]
     st.rerun()
 
-# --- Login Screen (Kept mostly the same for glassmorphism effect) ---
+# --- Custom CSS Injection ---
 
-def login_screen():
-    """Displays the beautiful, centered login interface."""
-    # Custom CSS for login form visibility on background
+def inject_global_css():
+    """Injects common styles for the app and the login-specific styles."""
+    
+    # We use CSS `:has()` selector to detect if the login-container is present, 
+    # ensuring the background image and sidebar hiding only occur on the login screen.
     st.markdown("""
     <style>
+        /* Global App Styling (Post-Login) */
+        .stApp {
+            background-color: #f0f2f6; /* Light gray background for main app */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        /* ------------------------------------------------------------- */
+        /* LOGIN SCREEN STYLING: ONLY when .login-container is present */
+        /* ------------------------------------------------------------- */
+        .stApp:has(.login-container) {
+            /* 2. Show background image ONLY during login */
+            background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-color: transparent; /* Override main app background */
+        }
+        
+        .stApp:has(.login-container) [data-testid="stHeader"], 
+        .stApp:has(.login-container) [data-testid="stToolbar"], 
+        .stApp:has(.login-container) [data-testid="stSidebar"] {
+            /* 1. Hide Sidebar, Header, and Menu only during login */
+            display: none !important;
+        }
+
+        /* Login Card (Glassmorphism effect) */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
@@ -181,7 +114,6 @@ def login_screen():
             border: 1px solid rgba(255,255,255,0.3);
             text-align: left;
         }
-
         .login-title {
             text-align: center;
             font-size: 32px;
@@ -190,19 +122,16 @@ def login_screen():
             text-shadow: 0 2px 4px rgba(0,0,0,0.5);
             margin-bottom: 25px;
         }
-
         .stTextInput > label, .stTextInput > div > div > input {
             color: white !important;
             text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
-        
         .stTextInput > div > div > input {
             background-color: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.5);
             border-radius: 8px;
             padding: 10px;
         }
-
         .stButton button {
             width: 100%;
             background-color: #4CAF50;
@@ -213,13 +142,82 @@ def login_screen():
             margin-top: 10px;
         }
         
+        /* ------------------------------------------------------------- */
+        /* ADMIN SIDEBAR STYLING (Post-Login) */
+        /* ------------------------------------------------------------- */
+        
+        /* 3. SHOW/EXPAND Sidebar ONLY for Admin */
+        .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
+            /* This ensures the sidebar is visible and expanded for non-login pages */
+            width: 300px !important; /* Set desired width */
+            min-width: 300px !important; 
+        }
+
+        /* 4. Hide Sidebar Collapse button for Department users (or if you want to enforce full-time expansion for Admin) */
+        /* [data-testid="collapsedControl"] { display: none !important; } */
+        
+        [data-testid="stSidebar"] {
+            background-color: #ffffff; 
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1); 
+            transition: width 0.3s ease-in-out;
+        }
+        .sidebar-header {
+            padding: 20px 20px 10px 20px;
+            color: #1E90FF;
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            border-bottom: 1px solid #e0e0e0;
+            margin-bottom: 15px;
+        }
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 10px; }
+        [data-testid="stSidebar"] .stRadio label {
+            padding: 12px 15px;
+            margin-bottom: 5px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        [data-testid="stSidebar"] .stRadio label:hover {
+            background-color: #f0f8ff;
+            color: #1E90FF;
+            cursor: pointer;
+        }
+        [data-testid="stSidebar"] .stRadio input:checked + div > span {
+            background-color: #1E90FF !important;
+            color: white !important;
+            border-radius: 8px;
+            font-weight: bold;
+            padding: 12px 15px;
+        }
+        [data-testid="stSidebar"] .stButton button {
+            width: 90%;
+            margin: 15px 5%;
+            background-color: #FF4B4B;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        [data-testid="stSidebar"] .stButton button:hover {
+            background-color: #CC0000;
+        }
     </style>
     """, unsafe_allow_html=True)
 
+# --- Login Screen ---
+
+def login_screen():
+    """Displays the login interface and uses the .login-container class to trigger CSS."""
+    # This class is crucial for the CSS to know when to hide the sidebar and apply the background image
+    st.markdown('<div class="login-container">', unsafe_allow_html=True) 
+    
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        # Note: The opening div tag is now *outside* this function and defined in the main flow
+        # to ensure the CSS selector works against the whole app.
         st.markdown('<div class="login-title">🔐 OMS Login</div>', unsafe_allow_html=True)
 
         with st.form("login_form"):
@@ -253,15 +251,16 @@ def login_screen():
                 st.balloons()
                 st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    # The closing div tag is placed here
+    st.markdown("</div>", unsafe_allow_html=True) 
 
-# --- Admin Sidebar & Routing (Updated) ---
+# --- Admin Sidebar & Routing ---
 
 def admin_sidebar():
-    """
-    Displays the full, beautifully styled navigation sidebar for 'admin' users.
-    """
-    # Custom Header for the Sidebar
+    """Displays the full, beautifully styled navigation sidebar for 'admin' users."""
+    
+    # 3. SHOW SIDEBAR: The global CSS handles the expansion. We just draw the content.
+    
     st.sidebar.markdown('<div class="sidebar-header">📦 OMS Admin</div>', unsafe_allow_html=True)
 
     ADMIN_MENU = {
@@ -278,39 +277,30 @@ def admin_sidebar():
     if "admin_menu_choice" not in st.session_state:
         st.session_state.admin_menu_choice = "Create Order"
 
-    # Map keys to strings with emojis for better display in the radio
     display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
     
-    # Get the index of the current selection for pre-selection
     current_key = st.session_state.admin_menu_choice
     current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
     
     st.sidebar.markdown("### **🧭 Main Navigation**")
     
-    # Create the radio button menu
     choice_with_icon = st.sidebar.radio(
-        "", # Empty label, as we use the markdown header
+        "", 
         display_options,
         index=current_index,
         key="admin_radio_menu" 
     )
 
-    # Extract the plain key from the choice (e.g., "Create Order" from "📦 Create Order")
-    # This assumes the key is everything after the first space (i.e., after the emoji)
     choice = " ".join(choice_with_icon.split(" ")[1:])
 
-    # Update session state and rerun if the choice changes
     if choice != st.session_state.admin_menu_choice:
          st.session_state.admin_menu_choice = choice
          st.rerun() 
 
-    # Load the selected page
     _, file = ADMIN_MENU[st.session_state.admin_menu_choice]
     load_page(file)
     
-    # Add a prominent logout button
     st.sidebar.markdown("---")
-    # The logout button is styled by the custom CSS in section 6
     st.sidebar.button("Logout", on_click=logout) 
 
 
@@ -318,12 +308,18 @@ def admin_sidebar():
 
 def department_router():
     """Routes a non-admin user directly to their assigned department page."""
+    
+    # 4. HIDE SIDEBAR: The default state set in st.set_page_config is 'collapsed'.
+    # For department users, we simply don't draw any content *into* the sidebar, 
+    # ensuring it remains visually empty and minimized.
+    
     role = st.session_state.get("role")
     
-    # Simple, clean sidebar for department users
-    st.sidebar.markdown(f"### ⚙️ Your Department: **{role.title()}**")
-    st.sidebar.markdown("---")
-    st.sidebar.button("Logout", on_click=logout, type="primary")
+    # Use the main area to show departmental context and a logout button
+    with st.container(border=True):
+        st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
+        st.markdown("Please manage your assigned orders below.")
+        st.button("Logout", on_click=logout) 
 
     file = DEPARTMENT_PAGE_MAP.get(role)
 
@@ -336,7 +332,7 @@ def department_router():
 
 def main_app():
     """Main function to handle post-login routing."""
-    # Main content header
+    
     st.markdown("<h1><span style='color:#1E90FF;'>📦</span> OMS Management System</h1>", unsafe_allow_html=True)
     st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
     st.markdown("---")
@@ -352,7 +348,12 @@ def main_app():
 
 # --- Main Execution Flow ---
 
+# Inject CSS styles first
+inject_global_css()
+
 if "role" not in st.session_state:
+    # User is not logged in, show the login screen.
     login_screen()
 else:
+    # User is logged in, show the main application.
     main_app()
