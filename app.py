@@ -104,13 +104,12 @@ if role == "admin":
             padding: 25px 20px;
             margin-bottom: 20px;
             color: white;
-            /* Less aggressive curve, looks cleaner */
             border-bottom-right-radius: 10px; 
         }
         .sidebar-logo-container h3 {
             color: #ffffff;
             margin: 0;
-            font-size: 1.6rem; /* Slightly larger title */
+            font-size: 1.6rem;
             font-weight: 700;
         }
         .sidebar-logo-container p {
@@ -121,7 +120,7 @@ if role == "admin":
 
         /* 3. Navigation Section Title */
         .sidebar-title {
-            font-size: 0.9rem; /* Smaller, cleaner title */
+            font-size: 0.9rem;
             font-weight: 600;
             margin: 0 20px 15px 20px; 
             color: #52668b;
@@ -137,12 +136,12 @@ if role == "admin":
             margin-left: 5%; 
             text-align: left;
             padding: 12px 18px;
-            border-radius: 8px; /* Consistent rounding */
-            margin-bottom: 4px; /* Less gap between items */
+            border-radius: 8px;
+            margin-bottom: 4px;
             font-size: 1rem;
             font-weight: 500;
             color: #334155;
-            border: 2px solid transparent; /* Added border for hover/active state */
+            border: 2px solid transparent;
             background-color: transparent;
             display: flex;
             gap: 15px;
@@ -150,22 +149,22 @@ if role == "admin":
             transition: all 0.2s ease;
         }
         .stButton>button:hover {
-            background-color: #f7f9fd; /* Very light hover */
+            background-color: #f7f9fd;
             color: #1e293b;
-            border: 2px solid #cbd5e1; /* Light border on hover */
+            border: 2px solid #cbd5e1;
             transform: none;
         }
 
         /* 5. Active Menu Item (Focus on border/text color) */
         .menu-item-active button {
-            background-color: #eef2ff !important; /* Very light blue background */
-            color: #4f46e5 !important; /* Stronger accent color */
+            background-color: #eef2ff !important;
+            color: #4f46e5 !important;
             font-weight: 600 !important;
-            border: 2px solid #6366f1 !important; /* Primary blue border highlights the active tab */
+            border: 2px solid #6366f1 !important;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); 
         }
         .menu-item-active button:hover {
-            background-color: #eef2ff !important; 
+            background-color: #eef2ff !important;
             color: #4f46e5 !important;
         }
         
@@ -178,7 +177,7 @@ if role == "admin":
         }
 
         .logout-container .stButton button {
-            background-color: #dc2626; /* Strong Red */
+            background-color: #dc2626;
             color: white;
             font-weight: 600;
             border-radius: 8px;
@@ -202,11 +201,12 @@ if role == "admin":
 # ----------------------------------------
 admin_menu = {
     "New Order": ("➕", "create_order.py"),
-    "All Orders": ("📊", "all_orders.py"), # ADDED NEW MENU ITEM
+    "All Orders": ("📊", "all_orders.py"),
+    "User Management": ("🧑‍💼", "manage_users.py"), # NEW ADMIN ITEM
     "Design": ("🖼️", "design.py"),
     "Printing": ("🖨️", "printing.py"),
     "Die-Cut": ("🔪", "diecut.py"),
-    "Lamination": ("💧", "lamination.py"), # Assuming you want to add this one too since it's in the file list
+    "Lamination": ("💧", "lamination.py"),
     "Assembly": ("🛠️", "assembly.py"),
     "Packaging": ("🎁", "packaging.py"),
 }
@@ -232,7 +232,7 @@ if role == "admin":
 
     # Track active selection
     if "active_menu" not in st.session_state:
-        # Set the default page to the new All Orders view
+        # Keep All Orders as the default landing page
         st.session_state.active_menu = "All Orders" 
 
     # Draw menu items
@@ -260,12 +260,11 @@ if role == "admin":
 # NON-ADMIN → AUTO LOAD THEIR PAGE
 # ----------------------------------------
 else:
-    # Based on the file list image, I'm assuming you have 'lamination' now too
     role_pages = {
         "design": "design.py", 
         "printing": "printing.py",
         "diecut": "diecut.py",
-        "lamination": "lamination.py", # Added lamination role
+        "lamination": "lamination.py",
         "assembly": "assembly.py",
         "packaging": "packaging.py", 
     }
