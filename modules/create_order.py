@@ -39,16 +39,26 @@ def generate_qr_base64(order_id: str) -> str:
 
 
 # ---------------------------------------------------
-# WHATSAPP LINK GENERATOR
+# WHATSAPP LINK GENERATOR (FIXED for robustness 🔥)
 # ---------------------------------------------------
 def get_whatsapp_link(phone: str, order_id: str, customer: str) -> str:
-    """Generates a WhatsApp link with a pre-filled message."""
+    """Generates a WhatsApp link with a pre-filled message, robustly handling phone input."""
+    
+    # 💥 FIX: Ensure phone is a string before calling string methods
+    if not isinstance(phone, str):
+        try:
+            phone = str(phone)
+        except:
+            # If conversion fails, default to empty string
+            phone = ""
+
     clean_phone = "".join(filter(str.isdigit, phone))
+    
     # Assuming Indian numbers, ensuring '91' prefix
-    if not clean_phone.startswith("91") and len(clean_phone) == 10:
+    if clean_phone and not clean_phone.startswith("91") and len(clean_phone) == 10:
         clean_phone = "91" + clean_phone
     elif len(clean_phone) < 10:
-        # Handle cases where phone is invalid/short, fall back safely
+        # Handle cases where phone is invalid/short
         clean_phone = "" 
 
     tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
@@ -159,16 +169,14 @@ def create_order_pdf(data: dict) -> bytes:
         "Size ID": data['size_id'],
     })
     
-    # QR Code for Tracking (FIXED: Uses Base64 data decoded to BytesIO, explicitly set type)
+    # QR Code for Tracking (PDF embedding fixed)
     pdf.chapter_title("Live Tracking QR Code")
     qr_b64 = generate_qr_base64(data['order_id'])
     qr_img_data = base64.b64decode(qr_b64)
     with io.BytesIO(qr_img_data) as img_io:
-        # Crucial fix: Specify type='PNG'
         pdf.image(img_io, x=80, y=pdf.get_y(), w=40, type='PNG') 
     pdf.ln(50)
     
-    # Convert PDF to bytes
     return pdf.output(dest='S').encode('latin-1')
 
 
@@ -176,7 +184,6 @@ def create_order_pdf(data: dict) -> bytes:
 # ROLE CHECK
 # ---------------------------------------------------
 if "role" not in st.session_state:
-    # Assuming default role if not set
     st.session_state["role"] = "design" 
 
 if st.session_state["role"] not in ["admin", "design"]:
@@ -192,7 +199,6 @@ st.caption("Effortlessly log new and repeat orders with smart auto-fill capabili
 
 all_orders = read("orders") or {}
 
-# Safely create customer list, filtering out non-dict entries
 customer_list = sorted(list(set(
     o.get("customer", "") for o in all_orders.values() 
     if isinstance(o, dict) and o.get("customer")
@@ -325,7 +331,6 @@ with st.form("order_form", clear_on_submit=True):
     foil = st.text_input("Foil ID", value=prev.get("foil_id",""))
     spotuv = st.text_input("Spot UV ID", value=prev.get("spotuv_id",""))
     
-    # Corrected label and key
     board_thickness = st.text_input("Board Thickness ID", value=prev.get("board_thickness_id","")) 
     
     paper = st.text_input("Paper Thickness ID", value=prev.get("paper_thickness_id",""))
@@ -339,19 +344,17 @@ with st.form("order_form", clear_on_submit=True):
 
     if submitted:
         # ---------------------------------
-        # VALIDATION (Mandatory Customer Name and Phone)
+        # VALIDATION 
         # ---------------------------------
         validation_error = False
         
-        # Check customer name
         if not customer or customer.strip() == "" or customer == "Select":
             form_status.error("❌ Customer Name is mandatory. Please select an existing customer or enter a new name.")
             validation_error = True
         
-        # Check customer phone
+        # Determine the final phone number for validation/storage
         final_phone_for_data = customer_phone
         if order_type_simple == "Repeat" and previous_order:
-             # Use the auto-filled phone for repeat orders if available
              final_phone_for_data = previous_order.get("customer_phone", "")
 
         clean_phone = "".join(filter(str.isdigit, final_phone_for_data))
@@ -398,7 +401,8 @@ with st.form("order_form", clear_on_submit=True):
         final_phone = data["customer_phone"]
         
         qr_b64 = generate_qr_base64(order_id)
-        whatsapp_link = get_whatsapp_link(final_phone, order_id, customer)
+        # Call the robustified function
+        whatsapp_link = get_whatsapp_link(final_phone, order_id, customer) 
         
         tracking_link = f"https://srppackaging.com/tracking.html?id={order_id}"
         html_email = f"""
@@ -426,7 +430,6 @@ with st.form("order_form", clear_on_submit=True):
             st.subheader("Actions")
             st.markdown(f"[💬 Send Tracking Link via WhatsApp]({whatsapp_link})")
             
-            # PDF Download Button 
             pdf_bytes = create_order_pdf(data)
             st.download_button(
                 label="📄 Download Order PDF",
