@@ -3,12 +3,18 @@ import json
 import time
 
 # ----------------------------------------
-# FIREBASE MODULE LOADING
+# FIREBASE MODULE IMPORTS
 # ----------------------------------------
-# NOTE: The Streamlit environment requires that the Firebase access functions 
-# (getFirestore, collection, doc, etc.) are available globally.
-# This code block ensures the necessary functions are loaded into the environment 
-# for the rest of the application to use.
+# Assuming the environment provides these functions globally or via a wrapper
+try:
+    from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth, signInWithCustomToken, signInAnonymously
+except ImportError:
+    st.error("Essential Firebase SDK functions (initializeApp, getFirestore, etc.) are missing. Cannot proceed.")
+    st.stop()
+
+# ----------------------------------------
+# FIREBASE CONFIGURATION & INITIALIZATION
+# ----------------------------------------
 
 # Global variables provided by the environment
 appId = locals().get('__app_id', 'default-app-id')
@@ -22,34 +28,35 @@ except json.JSONDecodeError:
     st.stop()
 
 # --- MANDATORY INITIALIZATION ---
-# Load the Firebase module functions into the global namespace.
-# This pattern is necessary for modules like 'firebase' to be available for import
-# or for functions like getFirestore to be called correctly.
-if 'firebase' not in locals():
-    # Attempt to load or initialize the mock/wrapper library
-    # Replace this with the actual initialization call if known, 
-    # or rely on the environment's implicit loading.
-    
-    # Since we cannot explicitly call 'bootstrapApplication' or similar setup 
-    # in a Streamlit component, we must assume that if the import fails, 
-    # we need to provide the functions directly if they exist elsewhere.
-    
-    # For now, let's remove the try/except block to allow the environment 
-    # to handle the missing imports if the files are loaded out of order.
-    # The error message should only appear if the environment genuinely lacks the module.
-    pass
-
-# Assuming 'firebase' module is correctly exposed by the environment once initialized:
 try:
-    from firebase import getFirestore, collection, doc, getDoc
-except ImportError:
-    st.error("Firebase SDK functions are missing. Please ensure your environment loads the Firebase modules correctly.")
+    # 1. Initialize the Firebase app
+    app = initializeApp(firebaseConfig)
+    
+    # 2. Get services
+    db = getFirestore(app)
+    auth = getAuth(app)
+    
+    # 3. Authenticate user using the custom token provided by the environment
+    # This is crucial for establishing the user ID required for Firestore security rules.
+    if auth_token:
+        # Sign in with the provided custom token
+        auth_user_cred = signInWithCustomToken(auth, auth_token)
+    else:
+        # Fallback to anonymous sign-in if no token is available (less secure)
+        auth_user_cred = signInAnonymously(auth)
+    
+    # Get the authenticated user ID for reference
+    user_id = auth_user_cred.user.uid if auth_user_cred and auth_user_cred.user else 'anonymous'
+
+except Exception as e:
+    # Catch any error during the initialization phase (network, config, auth)
+    st.error(f"Error during Firebase Initialization or Authentication: {e}")
     st.stop()
+
 
 # Define the common collection path helper
 def get_users_collection():
     """Returns the reference to the public 'users' collection."""
-    db = getFirestore()
     # Path: /artifacts/{appId}/public/data/users
     path = f"artifacts/{appId}/public/data/users"
     return collection(db, path)
@@ -71,7 +78,7 @@ st.markdown("""
 st.title("🔐 Login to OMS")
 
 # ----------------------------------------
-# DEFAULT ADMIN USER
+# DEFAULT ADMIN USER (Fallback)
 # ----------------------------------------
 DEFAULT_ADMIN = {
     "username": "admin",
@@ -81,7 +88,7 @@ DEFAULT_ADMIN = {
 }
 
 # ----------------------------------------
-# FETCH USER (FIXED TO USE FIRESTORE SDK)
+# FETCH USER
 # ----------------------------------------
 def get_user(username):
     # 1. Check if the requested user is the fallback default admin
@@ -101,8 +108,6 @@ def get_user(username):
         return None # User not found in Firestore
 
     except Exception as e:
-        # Catching and reporting Firestore specific errors if they occur later
-        # The primary error (ImportError) should be caught above.
         st.error(f"Error reading user from database: {e}")
         return None
 
@@ -123,7 +128,7 @@ username = st.text_input("Username", value="", key="username_input")
 password = st.text_input("Password", type="password", value="", key="password_input")
 
 if st.button("Login"):
-    # FIX: strip spaces and check properly
+    # Strip spaces and check properly
     input_username = username.strip()
     input_password = password.strip()
     
