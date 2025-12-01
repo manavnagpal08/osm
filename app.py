@@ -16,8 +16,9 @@ DEFAULT_ADMIN = {
     "role": "admin"
 }
 
+# ⭐ FIX: Corrected the routing for the 'design' department 
 DEPARTMENT_PAGE_MAP = {
-    "design": "create_order.py",
+    "design": "design.py",          # FIXED from create_order.py
     "printing": "printing.py",
     "diecut": "diecut.py",
     "assembly": "assembly.py",
@@ -94,20 +95,27 @@ def inject_global_css():
             display: none !important;
         }
 
-        /* Login Card Styles (retained) */
+        /* Login Card Styles */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
             padding: 40px;
             border-radius: 16px;
             width: 380px;
-            margin: auto;
-            margin-top: 140px;
+            margin: auto; /* Removed fixed margin-top */
+            margin-top: 140px; /* Re-added margin-top for vertical position */
             box-shadow: 0 4px 40px rgba(0,0,0,0.4);
             border: 1px solid rgba(255,255,255,0.3);
             text-align: left;
         }
-        /* ... other login styles remain ... */
+        
+        .login-title {
+            color: #1f2833;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            text-align: center;
+        }
         
         /* ------------------------------------------------------------- */
         /* ADMIN SIDEBAR STYLING (Standard Size & Ultimate Aesthetics) */
@@ -165,7 +173,7 @@ def inject_global_css():
         [data-testid="stSidebar"] .stRadio label:hover {
             background-color: rgba(0, 191, 255, 0.2);
             color: #00BFFF !important;
-            transform: translateX(2px) scale(1.01); /* Reduced translation for 250px width */
+            transform: translateX(2px) scale(1.01); 
             box-shadow: 0 4px 15px rgba(0, 191, 255, 0.3);
             cursor: pointer;
         }
@@ -204,44 +212,53 @@ def inject_global_css():
     </style>
     """, unsafe_allow_html=True)
 
-# --- Login Screen (Kept identical) ---
+# --- Login Screen ---
 
 def login_screen():
     """Displays the login interface."""
-    st.markdown('<div class="login-container">', unsafe_allow_html=True) 
     
+    # ⭐ FIX: Center columns FIRST
     col1, col2, col3 = st.columns([1, 2, 1])
-    
+
     with col2:
+        # START container INSIDE col2 (important!)
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
         st.markdown('<div class="login-title">🔐 OMS Login</div>', unsafe_allow_html=True)
 
-        with st.form("login_form"):
+        # Form prevents rerun glitches, clear_on_submit=False is the default but added for clarity
+        with st.form("login_form", clear_on_submit=False):
+
             username = st.text_input("Username", key="login_username_input", autocomplete="username")
             password = st.text_input("Password", type="password", key="login_password_input", autocomplete="current-password")
-            
+
             submitted = st.form_submit_button("Login")
 
             if submitted:
                 username_clean = username.strip()
                 password_clean = password.strip()
+
                 if not username_clean or not password_clean:
                     st.error("Please enter both username and password.")
-                    return
+                    return # Exit the submitted block
+
                 user = get_user(username_clean)
+
                 if not user:
                     st.error("User not found.")
                     return
+
                 if user.get("password") != password_clean:
                     st.error("Incorrect password.")
                     return
 
                 st.session_state.username = username_clean
                 st.session_state.role = user["role"]
-                st.success("Login successful! Redirecting...")
-                st.balloons()
-                st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True) 
+                st.success("Login successful! Redirecting...")
+                st.rerun() # Trigger the main_app() function
+
+        # END container
+        st.markdown("</div>", unsafe_allow_html=True) 
 
 # --- Admin Sidebar & Routing ---
 
