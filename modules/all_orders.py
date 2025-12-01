@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+# Assuming 'firebase' module handles connection (read, update, delete)
 from firebase import read, update, delete 
 from datetime import datetime, timezone, date, timedelta
 import time
 import numpy as np 
-from dateutil import parser # Use dateutil for robust date parsing
+from dateutil import parser 
 
 # --- CONFIGURATION ---
 DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
@@ -24,7 +25,6 @@ def to_datetime_utc(x):
     if not x:
         return None
     try:
-        # Use dateutil.parser for robust parsing of various formats
         dt = parser.isoparse(str(x).replace('Z', '+00:00'))
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
@@ -68,13 +68,16 @@ def get_sticky_filter_state(key, default_value):
 def set_sticky_filter_state(key, value):
     """Saves filter state to URL."""
     try:
-        if st.query_params.get(key) != str(value):
+        # Check if the query parameter is already set to the value before attempting to change
+        current_val = st.query_params.get(key)
+        if current_val != str(value):
             st.query_params[key] = str(value)
     except Exception as e:
+        # This catch is mainly for cases where st.query_params is not fully ready
         pass
 
 def set_selected_order(firebase_id):
-    """Sets the selected order ID in the query parameters."""
+    """Sets the selected order ID in the query parameters and reruns."""
     set_sticky_filter_state("selected_order_id", firebase_id)
     # Rerunning immediately to load the editor form
     st.rerun()
@@ -169,29 +172,23 @@ df, stage_times, production_stages = load_and_process_orders()
 def quick_advance_stage(current_firebase_id, current_stage):
     """Advances an order to the next stage and logs the timestamp."""
     
-    # 1. Determine the next stage
     current_index = production_stages.index(current_stage)
     if current_index < len(production_stages) - 1:
         next_stage = production_stages[current_index + 1]
     else:
-        # Already at the last stage ("Completed")
-        st.warning(f"Order is already at the final stage: {current_stage}")
+        st.warning(f"Order is already at the final stage: **{current_stage}**")
         return
 
-    # 2. Prepare update data
     timestamp_key = stage_times.get(next_stage)
     update_data = {
         "stage": next_stage,
-        # Log the timestamp for the *completion* of the current stage
         timestamp_key: get_current_firebase_time_str()
     }
 
-    # 3. Update Firebase
     update(f"orders/{current_firebase_id}", update_data)
     
     st.toast(f"✅ Advanced order to **{next_stage}**! Timestamp logged.", icon='⏩')
     st.cache_data.clear() 
-    # Clear the selection to refresh the table
     set_sticky_filter_state("selected_order_id", "") 
     st.rerun()
 
@@ -202,18 +199,16 @@ def save_order_updates(firebase_id, order_id, new_priority, new_qty, new_due_dat
         'qty': int(new_qty),
     }
 
-    # Handle Date conversion
     if new_due_date:
         try:
-            # Convert date object to datetime object at the end of the day, set to UTC
             dt_obj = datetime(new_due_date.year, new_due_date.month, new_due_date.day, 23, 59, 59, tzinfo=timezone.utc)
             update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
         except Exception:
-            st.error(f"Invalid date format for order {order_id}. Date not updated.")
+            st.error(f"Invalid date format for order **{order_id}**. Date not updated.")
             return
 
     update(f"orders/{firebase_id}", update_data)
-    st.toast(f"💾 Updated Order ID: {order_id} details.", icon='⚙️')
+    st.toast(f"💾 Updated Order ID: **{order_id}** details.", icon='⚙️')
     st.cache_data.clear() 
     set_sticky_filter_state("selected_order_id", "")
     st.rerun()
@@ -320,7 +315,8 @@ if selected_order_id:
             )
             new_due_date = col_e3.date_input(
                 "Due Date",
-                value=selected_row_data['Due_Date'],
+                # Ensure date is convertible to datetime before setting value
+                value=pd.to_datetime(selected_row_data['Due_Date']).date() if pd.notna(selected_row_data['Due_Date']) else date.today(),
                 key="edit_due_date"
             )
 
@@ -356,23 +352,18 @@ if selected_order_id:
 
 # --- DISPLAY ORDERS (Now used for selection) ---
 
-# Prepare table for display and selection (dropping the Firebase ID but keeping index)
-df_selectable = df_display.drop(columns=['Firebase ID'])
-
 st.markdown("## 📋 Order Management Spaces (Click any row to Edit)")
 
-# Use a tabs structure for better organization
 tab1, tab2, tab3 = st.tabs(["**All Filtered Orders**", "**Pending Orders** ⏳", "**Stored Products** 📦"])
 
-# Function to render selectable DataFrame
+# Function to render selectable DataFrame (FIXED)
 def render_selectable_dataframe(df_to_render, key_suffix=""):
-    """Renders a dataframe and handles row selection using session state."""
+    """Renders a dataframe and handles row selection using Streamlit's robust selection mode."""
     
-    # Drop Firebase ID before passing to selectbox/dataframe
+    # Drop Firebase ID before passing to the UI
     df_render = df_to_render.drop(columns=['Firebase ID'])
     
-    # Streamlit's selection is robust and returns a safe index list based on the displayed data.
-    selected_indices = st.dataframe(
+    selected_indices_container = st.dataframe(
         df_render,
         hide_index=True,
         use_container_width=True,
@@ -381,19 +372,20 @@ def render_selectable_dataframe(df_to_render, key_suffix=""):
         column_order=df_render.columns.tolist() # Maintain column order consistency
     )
     
-    # Check if a row was selected
-    if selected_indices and selected_indices['selection']:
+    # 🐛 FIX: Safely check and process the selection dictionary
+    selection = selected_indices_container.get('selection')
+    if selection and selection.get('rows'):
         # Get the positional index (0-based) of the selected row in df_render
-        position = selected_indices['selection']['rows'][0]
+        position = selection['rows'][0]
         
         # Use the positional index to safely retrieve the Firebase ID from the original df_to_render
+        # This is safe because df_to_render is guaranteed to have the same order as df_render
         selected_firebase_id = df_to_render.iloc[position]['Firebase ID']
         set_selected_order(selected_firebase_id)
 
 
 with tab1:
     st.markdown("### All Orders (Filtered View)")
-    # Sort by Score (descending) by default to show urgent orders first
     render_selectable_dataframe(
         df_display.sort_values(by="Score", ascending=False), 
         key_suffix="all"
