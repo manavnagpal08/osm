@@ -332,18 +332,16 @@ with tab1:
                     value=o.get("diecut_die_paper", ""),
                     placeholder="DIE-P-102",
                     key=f"die_paper_{order_id}",
-                    label_visibility="collapsed"
+                    # label_visibility="visible" (default)
                 )
-                col_die_p.markdown("<small>Paper Die #</small>", unsafe_allow_html=True)
                 
                 die_board = col_die_b.text_input(
                     "Board Die #",
                     value=o.get("diecut_die_board", ""),
                     placeholder="DIE-B-77",
                     key=f"die_board_{order_id}",
-                    label_visibility="collapsed"
+                    # label_visibility="visible" (default)
                 )
-                col_die_b.markdown("<small>Board Die #</small>", unsafe_allow_html=True)
 
                 # --- CUT COUNTS ---
                 st.caption("Cuts per Sheet/Board")
@@ -352,18 +350,16 @@ with tab1:
                     min_value=1,
                     value=o.get("diecut_cut_per_sheet", 1),
                     key=f"cut_sheet_{order_id}",
-                    label_visibility="collapsed"
+                    # label_visibility="visible" (default)
                 )
-                st.markdown("<small>Paper Cut Per Sheet</small>", unsafe_allow_html=True)
                 
                 cut_per_board = st.number_input(
                     "Board Cut Per Die",
                     min_value=1,
                     value=o.get("diecut_cut_per_board", 1),
                     key=f"cut_board_{order_id}",
-                    label_visibility="collapsed"
+                    # label_visibility="visible" (default)
                 )
-                st.markdown("<small>Board Cut Per Die</small>", unsafe_allow_html=True)
                 
                 # --- CALCULATIONS ---
                 qty = o.get("qty", 1)
