@@ -10,15 +10,12 @@ st.set_page_config(page_title="OMS Dashboard", layout="wide")
 # LOGIN CHECK
 # ----------------------------------------
 if "role" not in st.session_state:
-    # --- NOTE: This assumes a file named 'login.py' exists in the same directory ---
-    # The 'login.py' file must set st.session_state['role'] and st.session_state['username']
     try:
         with open("login.py", "r") as f:
-            # We use exec to run the login logic in the current scope
             exec(f.read())
         st.stop()
     except FileNotFoundError:
-        st.error("Login file (login.py) not found. Please create it.")
+        st.error("Login file (login.py) not found. Cannot start.")
         st.stop()
 
 role = st.session_state["role"]
@@ -58,7 +55,6 @@ def load_page(file):
     if os.path.exists(full_path):
         try:
             with open(full_path, "r") as f:
-                # Use globals() to ensure module code runs in the main app's scope
                 exec(f.read(), globals())
         except Exception as e:
              st.error(f"Error loading page '{file}': {e}")
@@ -72,7 +68,7 @@ def load_page(file):
 def logout():
     """Clears the session state and triggers a rerun to go back to the login screen."""
     st.session_state.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 
 # ----------------------------------------
@@ -83,84 +79,120 @@ st.caption(f"Logged in as **{username}** | Role: **{role}**")
 
 
 # ----------------------------------------
-# ADMIN SIDEBAR CSS (ENHANCED STYLING)
+# ADMIN SIDEBAR CSS (SUPER ENHANCED STYLING)
 # ----------------------------------------
 if role == "admin":
     st.markdown("""
         <style>
 
-        /* Sidebar container - Added shadow and white background */
+        /* 1. Global Sidebar Container */
         [data-testid="stSidebar"] {
-            background-color: #ffffff !important; /* White background */
+            background-color: #f7f9fd !important; /* Very light background */
             padding-top: 0px !important;
-            box-shadow: 2px 0px 5px rgba(0, 0, 0, 0.05); /* Subtle shadow */
+            box-shadow: 4px 0px 10px rgba(0, 0, 0, 0.03); /* Subtle, deep shadow */
+        }
+        
+        /* Ensures sidebar content scrolls if needed */
+        [data-testid="stSidebarContent"] {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
 
-        /* Streamlit's native sidebar navigation container */
-        [data-testid="stSidebarNav"] {
-            padding-top: 0 !important;
-        }
-
-        /* Custom section for Title/Logo space */
+        /* 2. Logo/Title Section */
         .sidebar-logo-container {
-            padding: 20px 15px;
-            border-bottom: 1px solid #e0e0e0; /* Separator line */
-            margin-bottom: 10px;
+            background-color: #0b1a38; /* Deep Charcoal Blue Header */
+            padding: 25px 20px;
+            margin-bottom: 20px;
+            color: white;
+            border-bottom-right-radius: 20px; /* Slight curve for elegance */
+        }
+        .sidebar-logo-container h3 {
+            color: #ffffff;
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 800;
+        }
+        .sidebar-logo-container p {
+            color: #a0aec0;
+            margin: 0;
+            font-size: 0.9rem;
         }
 
-        /* Sidebar section title */
+        /* 3. Navigation Section Title */
         .sidebar-title {
-            font-size: 1.2rem;
-            font-weight: 700;
-            margin: 15px 0 10px 15px; /* Adjusted margin for better spacing */
-            color: #1f2937;
+            font-size: 1rem;
+            font-weight: 600;
+            margin: 0 20px 15px 20px; 
+            color: #52668b;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 15px;
         }
 
-        /* Menu item button style (Streamlit button is used here) */
+        /* 4. Menu Item Button Styling */
         .stButton>button {
-            width: 100%;
+            width: 90%; /* Smaller width for centered appearance */
+            margin-left: 5%; /* Centering */
             text-align: left;
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin-bottom: 6px;
-            font-size: 1rem;
+            padding: 12px 18px;
+            border-radius: 12px; /* More rounded corners */
+            margin-bottom: 8px;
+            font-size: 1.05rem;
             font-weight: 500;
-            color: #4a5568;
+            color: #3f5175;
             border: none;
             background-color: transparent;
             display: flex;
-            gap: 10px;
+            gap: 15px;
             align-items: center;
-            cursor: pointer;
-            transition: all 0.2s ease-in-out;
+            transition: all 0.3s ease;
         }
-
-        /* Hover effect */
         .stButton>button:hover {
-            background-color: #f0f4f8; /* Light gray hover */
+            background-color: #e6eaf0; /* Softer hover color */
             color: #1a202c;
+            transform: translateY(-1px); /* Little lift effect */
         }
 
-        /* Active menu item - Uses Streamlit's primary color or a strong accent */
+        /* 5. Active Menu Item */
         .menu-item-active button {
-            background-color: #1e3a8a !important; /* A deep blue/primary color */
+            background-color: #2c52ed !important; /* Vibrant Primary Blue */
             color: white !important;
             font-weight: 700 !important;
-            box-shadow: 0 4px 6px rgba(30, 58, 138, 0.2); /* Subtle shadow for active item */
+            box-shadow: 0 5px 15px rgba(44, 82, 237, 0.3); /* Stronger shadow */
+            transform: none !important;
         }
         .menu-item-active button:hover {
-            background-color: #1c337a !important; /* Darker on hover */
+            background-color: #2544c4 !important; /* Darker on hover */
             color: white !important;
         }
         
-        /* CSS for the logout button container */
+        /* 6. Logout Button (Sticky Footer) */
         .logout-container {
             padding: 20px 15px;
-            margin-top: auto; /* Push to the bottom */
+            margin-top: auto; /* Pushes content above it up */
             border-top: 1px solid #e0e0e0;
+            background-color: #ffffff; /* White background for contrast */
         }
+
+        /* Styling for the Logout Button inside the container */
+        .logout-container .stButton button {
+            background-color: #f56565; /* Soft Red for warning/exit */
+            color: white;
+            font-weight: 600;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(245, 101, 101, 0.3);
+            width: 100%;
+            margin: 0;
+            margin-bottom: 0;
+            transform: none;
+        }
+        .logout-container .stButton button:hover {
+            background-color: #e53e3e;
+            transform: none;
+        }
+
 
         </style>
     """, unsafe_allow_html=True)
@@ -170,12 +202,12 @@ if role == "admin":
 # ADMIN MENU (LABEL, ICON, FILE)
 # ----------------------------------------
 admin_menu = {
-    "Create Order": ("📦", "create_order.py"),
-    "Design Dept": ("🎨", "design.py"),
-    "Printing Dept": ("🖨️", "printing.py"),
-    "Die-Cut Dept": ("✂️", "diecut.py"),
-    "Assembly Dept": ("🔧", "assembly.py"),
-    "Dispatch Dept": ("🚚", "dispatch.py"),
+    "New Order": ("➕", "create_order.py"),
+    "Design": ("🖼️", "design.py"),
+    "Printing": ("🖨️", "printing.py"),
+    "Die-Cut": ("🔪", "diecut.py"),
+    "Assembly": ("🛠️", "assembly.py"),
+    "Dispatch": ("🚀", "dispatch.py"),
 }
 
 
@@ -188,37 +220,33 @@ if role == "admin":
     st.sidebar.markdown(
         """
         <div class='sidebar-logo-container'>
-            <h3 style='color: #1e3a8a; margin: 0;'>📦 OMS Admin</h3>
-            <p style='font-size: 0.85rem; color: #6b7280; margin: 0;'>Navigation Dashboard</p>
+            <h3>📦 OMS Pro</h3>
+            <p>Admin Operations</p>
         </div>
         """, unsafe_allow_html=True
     )
     
     # --- 2. NAVIGATION SECTION ---
-    st.sidebar.markdown("<div class='sidebar-title'>🧭 Navigation</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='sidebar-title'>Navigation</div>", unsafe_allow_html=True)
 
     # Track active selection
     if "active_menu" not in st.session_state:
-        st.session_state.active_menu = "Create Order"
+        st.session_state.active_menu = "New Order"
 
     # Draw menu items
     for label, (icon, file) in admin_menu.items():
-        # Use a container to apply the active CSS class
         is_active = st.session_state.active_menu == label
         active_class = "menu-item-active" if is_active else ""
         
-        # Place the button inside a styled container
         st.sidebar.markdown(f"<div class='{active_class}'>", unsafe_allow_html=True)
         if st.sidebar.button(f"{icon} {label}", key=label, use_container_width=True):
             st.session_state.active_menu = label
         st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
 
-    # --- 3. LOGOUT SECTION ---
-    # Spacer to push the logout button to the bottom
-    st.sidebar.markdown("<div style='height: 50px;'></div>", unsafe_allow_html=True)
+    # --- 3. LOGOUT SECTION (Sticky Footer) ---
     st.sidebar.markdown("<div class='logout-container'>", unsafe_allow_html=True)
-    st.sidebar.button("🚪 Logout", on_click=logout, use_container_width=True, help="Click to log out of the system")
+    st.sidebar.button("🚪 Logout", on_click=logout, key="logout_btn", use_container_width=True)
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
     
     # Load selected page
@@ -231,8 +259,6 @@ if role == "admin":
 # ----------------------------------------
 else:
     role_pages = {
-        # NOTE: A non-admin design role should probably map to 'design.py', not 'create_order.py'
-        # I've updated the mapping based on department roles.
         "design": "design.py", 
         "printing": "printing.py",
         "diecut": "diecut.py",
