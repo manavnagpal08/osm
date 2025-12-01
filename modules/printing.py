@@ -34,15 +34,21 @@ def now_ist_formatted():
 
 
 # ---------------------------
-# LOAD ORDERS & USERS
+# LOAD ORDERS & USERS (CORRECTED BLOCK)
 # ---------------------------
 orders = read("orders") or {}
-# Assuming you have a 'users' collection with names/roles
-users = read("users") or {} 
-printer_names = ["Unassigned"] + [u['name'] for u in users.values() if u.get('role') == 'printing'] 
+# Safely load user data
+users_data = read("users") or {} 
+printer_names = ["Unassigned"]
+
+# Safely build the list of printer names
+for user_dict in users_data.values():
+    if isinstance(user_dict, dict) and user_dict.get('role') == 'printing' and user_dict.get('name'):
+        printer_names.append(user_dict['name'])
+
 # Fallback if no users list is available
-if not printer_names:
-    printer_names = ["Unassigned", "Printer A", "Printer B"] 
+if len(printer_names) == 1:
+    printer_names.extend(["Printer A", "Printer B"]) 
 
 pending = {}
 completed = {}
@@ -57,7 +63,7 @@ for key, o in orders.items():
         completed[key] = o
 
 # ---------------------------
-# FILE UTILITIES (Kept the same for brevity)
+# FILE UTILITIES
 # ---------------------------
 
 def file_download_button(label, file_entry, order_id, file_label, key_prefix):
@@ -203,6 +209,11 @@ with tab1:
                         "paper_size": new_paper_size,
                         "board_size": new_board_size
                     }
+                    # Update specs and preserve printing_notes if they exist
+                    current_notes = printing_specs.get("printing_notes")
+                    if current_notes is not None:
+                         updated_specs["printing_notes"] = current_notes
+                         
                     update(f"orders/{key}", {"printing_specs": updated_specs})
                     st.toast("Printing specs and assignment saved!", icon="💾")
                     st.rerun()
