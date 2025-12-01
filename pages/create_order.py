@@ -8,6 +8,7 @@ import io
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import urllib.parse
 
 # ---------------------------------------------------
 # CONFIG
@@ -20,11 +21,13 @@ GMAIL_PASS = "your_app_password"
 
 
 # ---------------------------------------------------
-# QR CODE GENERATOR
+# QR CODE GENERATOR (UPDATED FOR NEW TRACKING PAGE)
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
+    tracking_url = f"https://yourwebsite.com/tracking.html?id={order_id}"  # UPDATED 🔥
+
     qr = qrcode.QRCode(box_size=10, border=3)
-    qr.add_data(f"https://yourapp.com/track?order_id={order_id}")
+    qr.add_data(tracking_url)
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="black", back_color="white")
@@ -34,29 +37,26 @@ def generate_qr_base64(order_id: str):
 
 
 # ---------------------------------------------------
-# WHATSAPP LINK GENERATOR
-import urllib.parse
-
+# WHATSAPP LINK GENERATOR (UPDATED 🔥)
+# ---------------------------------------------------
 def get_whatsapp_link(phone, order_id, customer):
-    # CLEAN PHONE NUMBER → digits only
-    clean_phone = "".join(filter(str.isdigit, phone))
 
-    if clean_phone.startswith("91") is False:
+    clean_phone = "".join(filter(str.isdigit, phone))
+    if not clean_phone.startswith("91"):
         clean_phone = "91" + clean_phone
 
-    # MESSAGE (any length allowed)
+    tracking_url = f"https://yourwebsite.com/tracking.html?id={order_id}"
+
     message = (
-        f"Hello {customer}, your order {order_id} has been created successfully!\n"
-        f"Track your order here:\n"
-        f"https://yourapp.com/track?order_id={order_id}\n\n"
-        f"Thank you for choosing us!"
+        f"Hello {customer}, your order {order_id} is created successfully!\n\n"
+        f"Track your order live here:\n{tracking_url}\n\n"
+        f"Thank you for choosing Shree Ram Packers!"
     )
 
-    # URL-ENCODE MESSAGE
-    encoded_message = urllib.parse.quote(message)
+    encoded = urllib.parse.quote(message)
 
-    # FINAL LINK
-    return f"https://wa.me/{clean_phone}?text={encoded_message}"
+    return f"https://wa.me/{clean_phone}?text={encoded}"
+
 
 # ---------------------------------------------------
 # SEND EMAIL (FREE)
@@ -136,36 +136,47 @@ with box:
             selected = st.selectbox("Select Existing Customer", ["Select"] + customer_list)
             if selected != "Select":
                 customer = selected
-                # Auto-fill contact from previous orders
-                latest = next((o for o in all_orders.values() if o.get("customer") == customer), {})
-                customer_phone = latest.get("customer_phone", "")
-                customer_email = latest.get("customer_email", "")
+
+                cust_orders = {
+                    k: o for k, o in all_orders.items()
+                    if o.get("customer") == customer
+                }
+
+                if cust_orders:
+                    latest = sorted(
+                        cust_orders.values(),
+                        key=lambda x: x.get("received", "0000"),
+                        reverse=True
+                    )[0]
+
+                    customer_phone = latest.get("customer_phone", "")
+                    customer_email = latest.get("customer_email", "")
+
                 st.text_input("Phone", customer_phone)
                 st.text_input("Email", customer_email)
 
 
 # =====================================================
-# STEP 2 — PREVIOUS ORDER AUTO-FILL
+# STEP 2 — AUTO-FILL REPEAT
 # =====================================================
 previous_order = None
 
 if order_type_simple == "Repeat" and customer:
     cust_orders = {
         k: o for k, o in all_orders.items()
-        if isinstance(o, dict) and o.get("customer") == customer
+        if o.get("customer") == customer
     }
 
     if cust_orders:
         st.subheader("2️⃣ Select Previous Order to Auto-Fill")
+
         sorted_orders = sorted(
             cust_orders.values(),
             key=lambda o: o.get("received", "0000"),
             reverse=True
         )
 
-        options = [
-            f"{o['order_id']} — {o['item']}" for o in sorted_orders
-        ]
+        options = [f"{o['order_id']} — {o['item']}" for o in sorted_orders]
 
         sel = st.selectbox("Choose", ["--- Select ---"] + options)
 
@@ -181,7 +192,7 @@ st.session_state["previous_order"] = previous_order
 
 
 # =====================================================
-# STEP 3 — MAIN ORDER FORM
+# STEP 3 — MAIN FORM
 # =====================================================
 with st.form("order_form", clear_on_submit=True):
 
@@ -193,14 +204,15 @@ with st.form("order_form", clear_on_submit=True):
 
     prev = previous_order or {}
 
-    # GENERAL
     col1, col2, col3 = st.columns(3)
     with col1:
-        product_type = st.selectbox("Product Type", ["Bag", "Box"], index=["Bag","Box"].index(prev.get("product_type","Bag")))
+        product_type = st.selectbox("Product Type", ["Bag", "Box"], 
+                                    index=["Bag","Box"].index(prev.get("product_type","Bag")))
     with col2:
         qty = st.number_input("Quantity", min_value=1, value=int(prev.get("qty", 100)))
     with col3:
-        priority = st.selectbox("Priority", ["High","Medium","Low"], index=["High","Medium","Low"].index(prev.get("priority","Medium")))
+        priority = st.selectbox("Priority", ["High","Medium","Low"], 
+                                index=["High","Medium","Low"].index(prev.get("priority","Medium")))
 
     item = st.text_area("Product Description", value=prev.get("item",""))
 
@@ -209,7 +221,6 @@ with st.form("order_form", clear_on_submit=True):
 
     advance = st.radio("Advance Received?", ["Yes","No"])
 
-    # SPECS
     foil = st.text_input("Foil ID", value=prev.get("foil_id",""))
     spotuv = st.text_input("Spot UV ID", value=prev.get("spotuv_id",""))
     brand = st.text_input("Brand Thickness ID", value=prev.get("brand_thickness_id",""))
@@ -220,7 +231,6 @@ with st.form("order_form", clear_on_submit=True):
     total_value = qty * rate
     st.metric("Total Value", f"₹{total_value:,.2f}")
 
-    # SUBMIT
     submitted = st.form_submit_button("🚀 Create Order", type="primary")
 
     if submitted:
@@ -254,12 +264,14 @@ with st.form("order_form", clear_on_submit=True):
         # ---------------------------------
         qr_b64 = generate_qr_base64(order_id)
         whatsapp_link = get_whatsapp_link(customer_phone, order_id, customer)
+        tracking_link = f"https://srppackaging.com/tracking.html?id={order_id}"
 
         html_email = f"""
         <h2>Your Order {order_id} is Created</h2>
-        <p>Dear {customer},</p>
-        <p>Your order has been successfully created. You can track it using the link below:</p>
-        <p><a href="https://yourapp.com/track?order_id={order_id}">Track Order</a></p>
+        <p>Hello {customer},</p>
+        <p>Your order has been successfully created.</p>
+        <p><b>Track your order</b> here:</p>
+        <p><a href="{tracking_link}">{tracking_link}</a></p>
         <p>Thank you!</p>
         """
 
@@ -268,6 +280,7 @@ with st.form("order_form", clear_on_submit=True):
 
         st.success("🎉 Order Created Successfully!")
         st.image(base64.b64decode(qr_b64), width=200)
-        st.markdown(f"[📩 Send WhatsApp Message]({whatsapp_link})")
+
+        st.markdown(f"[💬 Send via WhatsApp]({whatsapp_link})")
 
         st.balloons()
