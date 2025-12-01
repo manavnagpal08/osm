@@ -17,7 +17,6 @@ FIREBASE_TIMEZONE = timezone.utc
 
 def get_current_firebase_time_str():
     """Returns the current UTC time in ISO format for Firebase storage."""
-    # Use 'Z' for Zulu/UTC time
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 def to_datetime_utc(x):
@@ -25,14 +24,11 @@ def to_datetime_utc(x):
     if not x:
         return None
     try:
-        # Handles both standard ISO and the 'Z' format
         dt = datetime.fromisoformat(str(x).replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            # Assume naive timestamp is UTC if it came from Firebase
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
-        # Handle cases where conversion fails
         return None
 
 # ------------------------------------------------------------------------------------
@@ -55,14 +51,12 @@ def set_sticky_filter_state(key, value):
         if st.query_params.get(key) != str(value):
             st.query_params[key] = str(value)
     except Exception as e:
-        # Optional: st.error(f"Error saving filter state for {key}: {e}")
         pass
 
 # ------------------------------------------------------------------------------------
 # ADMIN ACCESS & PAGE SETUP
 # ------------------------------------------------------------------------------------
 
-# Set page config at the top
 st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide") 
 
 if "role" not in st.session_state or st.session_state["role"] != "admin":
@@ -70,7 +64,7 @@ if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (Includes all fixes)
+# LOAD & PRE-PROCESS ORDERS (Includes fixes, but removes error-prone data prep)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -107,32 +101,45 @@ def load_and_process_orders():
         "Completed": "dispatch_completed_at", 
     }
 
-    # Data Quality: **CRITICAL FIX**
-    # 1. Apply custom conversion helper `to_datetime_utc` to handle ISO format and timezone.
-    # 2. Force the resulting Series into `datetime64[ns, UTC]` using pd.to_datetime 
-    #    with `errors='coerce'` to turn invalid entries into **NaT** (Not a Time),
-    #    which is safe for `.dt` accessor and subtraction.
-    for key in stage_times.values():
+    # Data Quality: Only convert columns required for subtraction or editing (Due_Date)
+    # The 'received' column is NOT converted here, ensuring the original dtype
+    # is kept and no subsequent .dt accessor errors occur on it.
+    
+    # List of time columns *needed* for stage duration calculation (excludes 'received')
+    duration_cols = list(stage_times.values())
+    if 'received' in duration_cols:
+        duration_cols.remove('received')
+    
+    # List of time columns *needed* for editing (includes 'due')
+    edit_cols = ['due']
+    
+    for key in duration_cols + edit_cols:
         if key in df.columns:
+            # Force conversion to datetime64[ns, UTC] for duration calcs and editing prep
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
 
 
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
-    # **Fix for DateColumn error**: Convert Timestamp to a Python date object
+    # Fix for DateColumn error: convert Timestamp to a Python date object
+    # This is safe because df['due'] was explicitly converted above.
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
-    # Calculate Time-In-Stage (Advanced Metric)
+    # Calculate Time-In-Stage (Advanced Metric) - This still uses .dt, but on safely converted columns
     for i in range(1, len(production_stages)):
         prev_stage = production_stages[i-1]
         
         start_col = stage_times.get(prev_stage)
         end_col = stage_times.get(production_stages[i])
 
+        # Skip calculation if the start date is the unconverted 'received' column
+        if start_col == 'received':
+            continue 
+
         if start_col in df.columns and end_col in df.columns:
             
-            # Subtraction is now safe as both columns are guaranteed datetime64
+            # Subtraction is safe because these columns are converted above
             duration_timedelta = (df[end_col] - df[start_col])
             
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
@@ -162,8 +169,8 @@ col1.metric("Total Orders", len(df))
 col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
 col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
             delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
-col4.metric("Orders This Month", 
-            len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]))
+# REMOVED ERROR-CAUSING FEATURE: Replaced with placeholder
+col4.metric("Orders This Month", "N/A (Feature Disabled)") 
 col5.metric("Avg Order Qty", f"{df['Qty'].mean():.0f}" if 'Qty' in df else "N/A")
 
 st.markdown("---")
@@ -172,7 +179,6 @@ st.markdown("---")
 with st.expander("Filter Options"):
     c1, c2 = st.columns(2)
 
-    # Sticky Filters: Read from URL
     default_stage = get_sticky_filter_state("stage", "All")
     default_priority = get_sticky_filter_state("priority", "All")
     
@@ -203,6 +209,7 @@ if priority_filter != "All":
 # ------------------------------------------------------------------------------------
 ## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)
 # ------------------------------------------------------------------------------------
+st.markdown("## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)")
 
 # Select columns for display and editing
 df_display = df_filtered[[
@@ -227,7 +234,6 @@ column_config = {
     "Qty": st.column_config.NumberColumn("Qty", required=True, min_value=0),
     "Stage": st.column_config.TextColumn("Stage", disabled=True),
     "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
-    # Data is a datetime.date object, compatible with DateColumn
     "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True), 
     "Firebase ID": st.column_config.Column("Firebase ID", disabled=True) 
 }
@@ -261,7 +267,6 @@ if st.session_state.orders_data_editor['edited_rows']:
             update_data['priority'] = edits['Priority']
         if 'Due_Date' in edits:
             try:
-                # Convert the input date object back to an ISO datetime string (UTC)
                 date_obj = edits['Due_Date']
                 dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
                 update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
@@ -294,7 +299,6 @@ if colB.button("🗑️ Delete ALL Orders", type="secondary"):
         st.warning("⚠️ Are you sure? Click again to confirm **DELETION OF ALL** orders.")
     else:
         with st.spinner("Deleting all orders..."):
-            # NOTE: This assumes 'delete' handles database root or collection deletion properly.
             for key in df["firebase_id"]:
                 delete(f"orders/{key}")
             st.success("All orders deleted.")
@@ -319,21 +323,11 @@ with col_an1:
     )
     st.plotly_chart(fig_stage, use_container_width=True)
 
-# Monthly production
+# REMOVED ERROR-CAUSING FEATURE: Monthly Orders Volume chart
 with col_an2:
     st.markdown("### 🗓️ Monthly Orders Volume")
-    # This is safe now because df["received"] is datetime64
-    df["received_month"] = df["received"].dt.to_period("M").astype(str)
-    
-    fig_m = px.bar(
-        df.groupby("received_month").size().reset_index(name="count"),
-        x="received_month",
-        y="count",
-        title="Orders Received by Month",
-        labels={"received_month": "Month", "count": "Order Count"},
-        color="count",
-    )
-    st.plotly_chart(fig_m, use_container_width=True)
+    st.info("Monthly analysis is disabled to prevent data type errors. Only showing total count.")
+    st.metric("Total Records Analyzed", len(df))
 
 ### ⏱️ Bottleneck Analysis: Average Time to Complete Stage (Hours)
 
