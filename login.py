@@ -1,48 +1,89 @@
 import streamlit as st
+from firebase import read  # your REST Firebase wrapper
 
 st.set_page_config(page_title="OMS Login", layout="centered")
 
-# ---------------------------
-# HIDE SIDEBAR ON LOGIN PAGE
-# ---------------------------
-hide_sidebar_style = """
-    <style>
-        [data-testid="stSidebar"] {
-            display: none !important;
-        }
-        [data-testid="collapsedControl"] {
-            display: none !important;
-        }
-    </style>
-"""
-st.markdown(hide_sidebar_style, unsafe_allow_html=True)
+# ----------------------------------------
+# HIDE SIDEBAR
+# ----------------------------------------
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] {display:none !important;}
+    [data-testid="collapsedControl"] {display:none !important;}
+    button[kind="header"] {display:none !important;}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🔐 Login to OMS")
 
-# ---------------------------
-# HARDCODED USER DATABASE
-# ---------------------------
-USERS = {
-    "admin7": {"password": "admin123", "role": "admin"},
-    "design01": {"password": "design123", "role": "design"},
-    "print04": {"password": "print123", "role": "printing"},
-    "die04": {"password": "die123", "role": "diecut"},
-    "assembly01": {"password": "assembly123", "role": "assembly"},
-    "dispatch01": {"password": "dispatch123", "role": "dispatch"},
+# ----------------------------------------------------------
+# DEFAULT ADMIN USER (ALWAYS AVAILABLE)
+# You may modify this:
+DEFAULT_ADMIN = {
+    "username": "admin",
+    "password": "admin123",
+    "role": "admin"
 }
+# ----------------------------------------------------------
 
-# If already logged in → go dashboard
+
+# ----------------------------------------
+# FETCH USER FROM FIREBASE
+# ----------------------------------------
+def get_user(username):
+    """
+    Fetch a user from Firestore.
+    If not found and username==admin → use default admin.
+    """
+    # Try Firebase first
+    doc = read("users", username)
+    if doc:
+        return doc
+    
+    # Fallback to built-in admin
+    if username == DEFAULT_ADMIN["username"]:
+        return DEFAULT_ADMIN
+
+    return None
+
+
+# ----------------------------------------
+# IF ALREADY LOGGED IN → LOAD DASHBOARD
+# ----------------------------------------
 if "role" in st.session_state:
-    st.switch_page("app.py")
+    with open("app.py", "r") as f:
+        exec(f.read())
+    st.stop()
 
+
+# ----------------------------------------
+# LOGIN FORM
+# ----------------------------------------
 username = st.text_input("Username")
 password = st.text_input("Password", type="password")
 
 if st.button("Login"):
-    if username in USERS and USERS[username]["password"] == password:
-        st.session_state["username"] = username
-        st.session_state["role"] = USERS[username]["role"]
-        st.success("Login successful!")
-        st.switch_page("app.py")
-    else:
-        st.error("Invalid username or password")
+
+    if not username or not password:
+        st.error("Please enter both fields.")
+        st.stop()
+
+    user = get_user(username)
+
+    if not user:
+        st.error("User not found.")
+        st.stop()
+
+    if password != user.get("password"):
+        st.error("Incorrect password.")
+        st.stop()
+
+    # LOGIN SUCCESS
+    st.session_state["username"] = username
+    st.session_state["role"] = user.get("role")
+
+    st.success("Login successful!")
+
+    with open("app.py", "r") as f:
+        exec(f.read())
+    st.stop()
