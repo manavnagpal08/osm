@@ -376,7 +376,34 @@ def main_app():
 # Inject CSS styles first
 inject_global_css()
 
+# 🔥 Inject CSS only once — before routing
+inject_global_css()
+
+# ---------------------------------------------------------
+# 🚨 FIXED LOGIN ROUTING (Stops infinite redirect loop)
+# ---------------------------------------------------------
+
+# If user is not logged in → show login screen ONLY
 if "role" not in st.session_state:
     login_screen()
-else:
-    main_app()
+    st.stop()
+
+# ---------------------------------------------------------
+# 🔥 PART 2 — Securely handle FCM token route
+# (Only admin + only after login)
+# ---------------------------------------------------------
+params = st.experimental_get_query_params()
+if "upload_admin_token" in params and st.session_state.get("role") == "admin":
+    try:
+        raw = st.request.body.decode()
+        update("admin_tokens", {"token": raw})
+        st.success("Admin device token saved!")
+    except Exception as e:
+        st.error(f"Error saving token: {e}")
+    st.stop()
+
+# ---------------------------------------------------------
+# 🚀 If logged in → go to main application
+# ---------------------------------------------------------
+main_app()
+
