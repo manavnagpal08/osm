@@ -13,7 +13,7 @@ if "role" not in st.session_state:
 
 if st.session_state["role"] not in ["admin", "dispatch", "packaging"]:
     st.error("❌ You do not have permission to access this page.")
-    st.stop()
+
 
 USER = st.session_state["username"]
 
@@ -192,7 +192,7 @@ with tab3:
 
     if len(dispatch) == 0:
         st.warning("Dispatch queue empty.")
-        st.stop()
+        
 
     for key, o in dispatch.items():
 
@@ -230,7 +230,7 @@ with tab4:
 
     if len(completed) == 0:
         st.warning("No completed orders.")
-        st.stop()
+       
 
     for key, o in completed.items():
         st.json(o)
