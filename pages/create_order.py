@@ -35,15 +35,28 @@ def generate_qr_base64(order_id: str):
 
 # ---------------------------------------------------
 # WHATSAPP LINK GENERATOR
-# ---------------------------------------------------
-def get_whatsapp_link(phone, order_id, customer):
-    msg = (
-        f"Hello {customer}, your order {order_id} has been created successfully!%0A"
-        f"You can track your order here:%0A"
-        f"https://yourapp.com/track?order_id={order_id}"
-    )
-    return f"https://wa.me/91{phone}?text={msg}"
+import urllib.parse
 
+def get_whatsapp_link(phone, order_id, customer):
+    # CLEAN PHONE NUMBER → digits only
+    clean_phone = "".join(filter(str.isdigit, phone))
+
+    if clean_phone.startswith("91") is False:
+        clean_phone = "91" + clean_phone
+
+    # MESSAGE (any length allowed)
+    message = (
+        f"Hello {customer}, your order {order_id} has been created successfully!\n"
+        f"Track your order here:\n"
+        f"https://yourapp.com/track?order_id={order_id}\n\n"
+        f"Thank you for choosing us!"
+    )
+
+    # URL-ENCODE MESSAGE
+    encoded_message = urllib.parse.quote(message)
+
+    # FINAL LINK
+    return f"https://wa.me/{clean_phone}?text={encoded_message}"
 
 # ---------------------------------------------------
 # SEND EMAIL (FREE)
