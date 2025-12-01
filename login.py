@@ -13,8 +13,14 @@ except ImportError:
     st.stop()
 
 # Global variables provided by the environment (needed for collection path)
-appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-firebaseConfig = json.loads(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+# The original JavaScript-style syntax is replaced with correct Python logic to access globals.
+appId = locals().get('__app_id', 'default-app-id')
+config_str = locals().get('__firebase_config', '{}')
+try:
+    firebaseConfig = json.loads(config_str)
+except json.JSONDecodeError:
+    st.error("Configuration error: Invalid Firebase config JSON.")
+    st.stop()
 
 # Define the common collection path helper
 def get_users_collection():
