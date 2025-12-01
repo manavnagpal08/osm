@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 # Assuming 'firebase' module exists and has 'read', 'delete', and 'write' functions
+# NOTE: In a real environment, you need to ensure 'firebase' module is available
 from firebase import read, delete 
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Tuple, Optional, List
@@ -44,6 +45,7 @@ def safe_iso_to_dt(iso_str: Optional[str]) -> Optional[datetime]:
     """Safely converts ISO string to timezone-aware datetime."""
     if iso_str:
         try:
+            # Ensure we parse and convert to UTC for consistent comparisons
             dt = parser.isoparse(iso_str).astimezone(timezone.utc)
             return dt
         except Exception:
@@ -70,6 +72,7 @@ def calculate_stage_duration(start_time: Optional[str], end_time: Optional[str])
     if start_time and not end_time:
         start_dt = safe_iso_to_dt(start_time)
         if start_dt:
+            # Calculate time in progress based on current time
             in_progress_seconds = (datetime.now(timezone.utc) - start_dt).total_seconds()
             return f"In Progress ({format_seconds_to_hms(in_progress_seconds)})"
             
@@ -82,6 +85,7 @@ def get_completion_info(stage: str) -> Tuple[float, str]:
         return 1.0, "green"
     try:
         index = stages.index(stage)
+        # Calculate progress slightly past the stage start for visual feedback
         progress = (index + 0.5) / len(stages) 
         color = "blue"
         if stage in ["Packing", "Dispatch"]:
@@ -216,19 +220,22 @@ def analyze_wip(data_list: List[Dict[str, Any]]):
     return wip_inventory, len(wip_orders), wip_aging_list
 
 # -------------------------------------
-# FETCH & PRE-ANALYZE ORDERS
+# FETCH & PRE-ANALYZE ORDERS (FIX APPLIED)
 # -------------------------------------
 @st.cache_data(ttl=600)
 def fetch_and_analyze_data():
     """Fetches data and runs the initial, cached KPI analysis."""
-    orders: Dict[str, Any] = read("orders") or {}
-    
-    # FIX: Ensure 'orders' is a dict before attempting to iterate
-    if not isinstance(orders, dict):
-        return None, None, None, None # Return None for all data parts on failure
-    
+    raw_data = read("orders")
+
+    # FIX: Explicitly check if the data returned from Firebase is a dictionary.
+    # This prevents the 'bool' object is not iterable error if 'read()' returns False/None on failure.
+    if not isinstance(raw_data, dict):
+        st.error("❌ ERROR: Data source returned invalid data (not a dictionary).")
+        return None, None, None, None # Cleanly return None for all data components
+
     orders_with_key = {}
-    for key, o in orders.items():
+    for key, o in raw_data.items():
+        # Also ensures that nested elements are dictionaries
         if isinstance(o, dict):
             o['firebase_id'] = key
             orders_with_key[key] = o
@@ -239,6 +246,8 @@ def fetch_and_analyze_data():
     all_orders_list = list(orders_with_key.values())
     overall_kpis = analyze_kpis(all_orders_list)
     wip_inventory, total_wip_orders, wip_aging_list = analyze_wip(all_orders_list)
+    
+    # Return all expected data structures
     return orders_with_key, all_orders_list, overall_kpis, (wip_inventory, total_wip_orders, wip_aging_list)
 
 # -------------------------------------
@@ -249,20 +258,20 @@ def delete_single_order(order_key: str):
     """Handles the deletion of a single order and updates the state/cache."""
     try:
         delete("orders", order_key)
-        st.cache_data.clear()
+        st.cache_data.clear() # Clear cache to force re-fetch
         st.success(f"✅ Order **{order_key}** successfully deleted. Refreshing dashboard.")
         st.rerun()
     except Exception as e:
         st.error(f"❌ Failed to delete order {order_key}: {e}")
 
-# --- START OF PART 2 ---
-# --- CONTINUE FROM PART 1 ---
 
 # -------------------------------------
 # ROLE CHECK & PAGE SETUP
 # -------------------------------------
 if "role" not in st.session_state:
-    st.switch_page("pages/login.py")
+    # Assuming "pages/login.py" is the standard login page 
+    st.error("Authentication required. Please log in.")
+    st.stop() # Stops execution until login is resolved
 
 if st.session_state["role"] != "admin":
     st.error("❌ Only admin can view this page.")
@@ -273,12 +282,13 @@ st.write("Focus on **Actionable Intelligence** — Identify bottlenecks, manage 
 
 
 # -------------------------------------
-# INITIAL DATA LOAD & VALIDATION (Error Fix Applied Here)
+# INITIAL DATA LOAD & VALIDATION
 # -------------------------------------
 orders, all_orders_list, overall_kpis, wip_data = fetch_and_analyze_data()
 
+# Safety check for failed data load (guaranteed by the fix above)
 if orders is None or all_orders_list is None: 
-    st.warning("No orders found or data fetching failed.")
+    st.warning("No orders found or data fetching failed. Dashboard requires valid data.")
     st.stop()
 
 wip_inventory, total_wip_orders, wip_aging_list = wip_data
@@ -374,9 +384,10 @@ if total_wip_orders > 0:
         
         wip_aging_df = pd.DataFrame(wip_aging_list)
         
-        def highlight_aging(s):
-            is_stale = s['Aging (Days)'] > ORDER_AGING_DAYS_WARNING
-            return ['background-color: #ffcccc' if v else '' for v in is_stale]
+        # Highlight rows where Aging (Days) exceeds the threshold
+        def highlight_aging(row):
+            is_stale = row['Aging (Days)'] > ORDER_AGING_DAYS_WARNING
+            return ['background-color: #ffcccc' if is_stale else '' for _ in row]
         
         st.dataframe(
             wip_aging_df.sort_values(by='Aging (Days)', ascending=False).style.apply(highlight_aging, axis=1),
@@ -407,6 +418,7 @@ for stage, total_s in overall_kpis['stage_time_totals'].items():
 st.subheader("🛑 Bottleneck Identification & Action")
 
 if avg_stage_times_seconds:
+    # Identify the stage with the maximum average time
     bottleneck_stage = max(avg_stage_times_seconds, key=avg_stage_times_seconds.get)
     bottleneck_time = format_seconds_to_hms(avg_stage_times_seconds[bottleneck_stage])
     
@@ -422,6 +434,7 @@ if avg_stage_times_seconds:
         st.info(f"The single **longest delay** that drove this average was in order **`{slowest_id or 'N/A'}`** with a time of **{slowest_time_hms}**.")
     
     with col_btnk2:
+        # Button to automatically filter the orders list to the bottleneck stage
         if st.button(f"🔍 Filter to Orders in **{bottleneck_stage}** Stage", type="primary"):
             st.session_state['stage_f'] = bottleneck_stage
             st.session_state['quick_filter'] = "None" 
@@ -506,6 +519,7 @@ dq_df = pd.DataFrame(
 dq_df['Missing %'] = (dq_df['Missing Count'] / total_orders) * 100
 dq_df['Total Orders'] = total_orders
 
+# Altair chart for Data Quality
 dq_chart = alt.Chart(dq_df).mark_bar().encode(
     x=alt.X('Missing Count', title='Number of Orders Missing Data'),
     y=alt.Y('Critical Field', sort='x', title='Required Field'),
@@ -560,7 +574,7 @@ with col_viz2:
             if count > 0:
                 avg_time_chart_data.append({
                     'Stage': stage,
-                    'Avg Time (Min)': (total_s / count) / 60 
+                    'Avg Time (Min)': (total_s / count) / 60 # Convert seconds to minutes
                 })
 
         avg_df = pd.DataFrame(avg_time_chart_data)
@@ -585,6 +599,7 @@ st.divider()
 ## 🔍 Filter Panel
 # -------------------------------------
 
+# Initialize session state for filters
 if 'stage_f' not in st.session_state: st.session_state['stage_f'] = "All"
 if 'product_f' not in st.session_state: st.session_state['product_f'] = "All"
 if 'priority_f' not in st.session_state: st.session_state['priority_f'] = "All"
@@ -657,6 +672,7 @@ for key, o in orders.items():
     if not isinstance(o, dict):
         continue
     
+    # 1. Quick Filter Logic
     is_late_or_past_due = False
     due_str = o.get('due')
     completed_str = o.get('dispatched_at') or o.get('packing_completed_at')
@@ -665,6 +681,7 @@ for key, o in orders.items():
     if due_str:
         due_dt = safe_iso_to_dt(due_str)
         if due_dt:
+            # Check for late completion (if finished) or past due (if still active)
             if (is_completed and completed_str and safe_iso_to_dt(completed_str) > due_dt) or \
                (not is_completed and now > due_dt):
                 is_late_or_past_due = True
@@ -678,6 +695,7 @@ for key, o in orders.items():
     elif quick_filter == "Data Quality Issues" and not any(not o.get(k) and o.get('received') for k in data_quality_keys):
         continue
             
+    # 2. Advanced Filter Logic
     if stage_filter != "All" and o.get("stage") != stage_filter:
         continue
 
@@ -687,12 +705,14 @@ for key, o in orders.items():
     if priority_filter != "All" and o.get("priority") != priority_filter:
         continue
             
+    # 3. Date Filter Logic
     received_str = o.get("received")
     if received_str:
         received_dt = safe_iso_to_dt(received_str)
         if received_dt and (received_dt < start_dt or received_dt > end_dt):
             continue
     
+    # 4. Text Search Logic
     if customer_filter and customer_filter.lower() not in o.get("customer", "").lower():
         continue
 
@@ -710,9 +730,10 @@ if not filtered:
     st.info("No orders match the selected filters.")
     st.stop()
 
+# Sort filtered list by received date (most recent first)
 sorted_filtered_list: list[Tuple[str, Any]] = sorted(
     filtered.items(),
-    key=lambda x: x[1].get("received", "2099-12-31"),
+    key=lambda x: x[1].get("received", "2099-12-31"), # Use a late default for sorting stability
     reverse=True 
 )
 
@@ -850,7 +871,7 @@ for key, order in sorted_filtered_list:
              completion_ts = format_timestamp(order.get(end_key, "N/A"))
              
              # Skip empty dispatch stage if not completed
-             if stage_name == 'Dispatch' and completion_ts == 'N/A':
+             if stage_name == 'Dispatch' and completion_ts == 'N/A' and stage != 'Dispatch':
                  continue
                  
              workflow_data.append({
