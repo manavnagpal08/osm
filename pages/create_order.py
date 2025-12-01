@@ -24,7 +24,7 @@ GMAIL_PASS = "your_app_password"
 # QR CODE GENERATOR (UPDATED FOR NEW TRACKING PAGE)
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
-    tracking_url = f"https://yourwebsite.com/tracking.html?id={order_id}"  # UPDATED 🔥
+    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"  # UPDATED 🔥
 
     qr = qrcode.QRCode(box_size=10, border=3)
     qr.add_data(tracking_url)
@@ -45,7 +45,7 @@ def get_whatsapp_link(phone, order_id, customer):
     if not clean_phone.startswith("91"):
         clean_phone = "91" + clean_phone
 
-    tracking_url = f"https://yourwebsite.com/tracking.html?id={order_id}"
+    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
 
     message = (
         f"Hello {customer}, your order {order_id} is created successfully!\n\n"
