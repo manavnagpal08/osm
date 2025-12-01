@@ -17,9 +17,11 @@ DEFAULT_ADMIN = {
 }
 
 # ⭐ FIX: Corrected the routing for the 'design' department 
+# 🚀 ADD: Added the 'lamination' department
 DEPARTMENT_PAGE_MAP = {
-    "design": "design.py",          # FIXED from create_order.py
+    "design": "design.py",
     "printing": "printing.py",
+    "lamination": "lamination.py", # NEW DEPARTMENT
     "diecut": "diecut.py",
     "assembly": "assembly.py",
     "packaging": "packaging.py",
@@ -271,6 +273,7 @@ def admin_sidebar():
         "Create Order": ("📦", "create_order.py"),
         "Design Dept": ("🎨", "design.py"),
         "Printing Dept": ("🖨️", "printing.py"),
+        "Lamination Dept": ("🛡️", "lamination.py"), # NEW ENTRY
         "Die-Cut Dept": ("✂️", "diecut.py"),
         "Assembly Dept": ("🔧", "assembly.py"),
         "Packaging Dept": ("📦✨", "packaging.py"),
