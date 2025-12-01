@@ -278,6 +278,74 @@ if st.session_state["role"] != "admin":
     st.stop()
 
 st.title("🚀 Executive Production Analytics Dashboard (Actionable Intelligence)")
+# -------------------------------------------------------
+# 🔔 Admin Push Notification — Enable Notifications Button
+# -------------------------------------------------------
+st.markdown("""
+<script type="module">
+
+// SERVICE WORKER + FCM TOKEN SENDER
+async function requestAdminFCM() {
+    try {
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+            alert("🔕 Notification permission denied");
+            return;
+        }
+
+        // Load Firebase
+        const firebaseConfig = {
+            apiKey: "YOUR_FIREBASE_KEY",
+            authDomain: "YOUR_FIREBASE_DOMAIN",
+            projectId: "YOUR_FIREBASE_PROJECT_ID",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        if (!self.firebaseApps?.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const messaging = firebase.messaging();
+
+        // Register service worker
+        const reg = await navigator.serviceWorker.register("/static/firebase-messaging-sw.js");
+
+        // Get FCM token
+        const token = await messaging.getToken({
+            vapidKey: "YOUR_VAPID_KEY",
+            serviceWorkerRegistration: reg
+        });
+
+        // Send token to Streamlit backend
+        await fetch("?upload_admin_token=1", {
+            method: "POST",
+            body: token
+        });
+
+        alert("🎉 Admin notifications enabled successfully!");
+    } catch (e) {
+        console.error(e);
+        alert("Error enabling notifications");
+    }
+}
+
+</script>
+
+<button onclick="requestAdminFCM()" 
+style="
+ padding:12px; 
+ background:#1e88e5;
+ color:white;
+ border-radius:6px;
+ border:none;
+ font-size:16px;
+ cursor:pointer;">
+🔔 Enable Admin Notifications
+</button>
+""", unsafe_allow_html=True)
+
 st.write("Focus on **Actionable Intelligence** — Identify bottlenecks, manage risk, and drive continuous improvement.")
 
 
