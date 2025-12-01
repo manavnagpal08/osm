@@ -202,86 +202,79 @@ def preview(label, b64):
 
 
 # ---------------------------------------------------
-# PURE PYTHON PDF SLIP GENERATOR
+# STYLED HTML REPORT GENERATOR (Replaces simple PDF slip)
 # ---------------------------------------------------
-def generate_lamination_slip(order, film_type, temp, pressure, assign_to, qc_status):
+def generate_lamination_html_report(order, film_type, temp, pressure, assign_to, qc_status):
+    """Generates a styled HTML report for Lamination for browser printing to PDF."""
 
-    # Build final text with multiple lines
-    lines = [
-        "LAMINATION DEPARTMENT – JOB SLIP",
-        "",
-        f"Order ID: {order.get('order_id')}",
-        f"Customer: {order.get('customer')}",
-        f"Item: {order.get('item')}",
-        f"Product Type: {order.get('product_type', 'N/A')}",
-        "",
-        "--- LAMINATION SPECIFICATIONS ---",
-        f"Film Type: {film_type}",
-        f"Temperature: {temp}",
-        f"Pressure: {pressure}",
-        f"Assigned To: {assign_to}",
-        f"Quality Check: {qc_status}",
-        "",
-        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    ]
+    order_id = order.get('order_id')
+    customer = order.get('customer')
+    item = order.get('item')
+    product_type = order.get('product_type', 'N/A')
+    
+    # Simple SVG logo (Shield) base64 data for visual appeal
+    logo_svg_base64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNTY0YmMiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xMiAyMnM4LTQgOC0xMmg0LjVhNC41IDQuNSAwIDAgMC0zLjUtNFYyTDIwLjUgNFYycy00LjUuNS00LjUgNC41VjIyaDR6Ii8+PC9zdmc+"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Lamination Job Report - {order_id}</title>
+        <style>
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }}
+            .report-container {{ max-width: 800px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }}
+            .header {{ display: flex; align-items: center; border-bottom: 3px solid #007bff; padding-bottom: 15px; margin-bottom: 25px; }}
+            .logo {{ width: 50px; height: 50px; margin-right: 20px; }}
+            h1 {{ color: #2564bc; margin: 0; font-size: 28px; font-weight: 600; }}
+            h2 {{ color: #007bff; border-left: 4px solid #007bff; padding-left: 10px; margin-top: 30px; margin-bottom: 15px; font-size: 20px; }}
+            .section {{ margin-bottom: 20px; }}
+            .detail-row {{ display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e9ecef; }}
+            .detail-label {{ font-weight: 600; color: #495057; width: 30%; }}
+            .detail-value {{ width: 65%; text-align: right; color: #343a40; }}
+            .notes-box {{ border: 1px solid #ced4da; padding: 15px; border-radius: 4px; background-color: #f8f9fa; white-space: pre-wrap; }}
+            .footer {{ border-top: 1px solid #ced4da; margin-top: 40px; padding-top: 15px; text-align: center; font-size: 12px; color: #6c757d; }}
+        </style>
+    </head>
+    <body>
+        <div class="report-container">
+            <div class="header">
+                <img src="data:image/svg+xml;base64,{logo_svg_base64}" alt="Logo" class="logo">
+                <h1>LAMINATION JOB REPORT</h1>
+            </div>
 
-    # Escape PDF special characters
-    def esc(s):
-        return s.replace("(", "\\(").replace(")", "\\)")
+            <h2>General Information</h2>
+            <div class="section">
+                <div class="detail-row"><span class="detail-label">Order ID:</span><span class="detail-value">{order_id}</span></div>
+                <div class="detail-row"><span class="detail-label">Customer:</span><span class="detail-value">{customer}</span></div>
+                <div class="detail-row"><span class="detail-label">Item Description:</span><span class="detail-value">{item}</span></div>
+                <div class="detail-row"><span class="detail-label">Product Type:</span><span class="detail-value">{product_type}</span></div>
+            </div>
+            
+            <h2>Lamination Specifications</h2>
+            <div class="section">
+                <div class="detail-row"><span class="detail-label">Film/Finish Type:</span><span class="detail-value">{film_type}</span></div>
+                <div class="detail-row"><span class="detail-label">Temperature Used:</span><span class="detail-value">{temp}</span></div>
+                <div class="detail-row"><span class="detail-label">Pressure Setting:</span><span class="detail-value">{pressure}</span></div>
+            </div>
 
-    # Build PDF text block with each line
-    pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
-    for line in lines:
-        if line.startswith('---'):
-             pdf_text += "/F1 14 Tf\n" # Larger font for headers
-        else:
-             pdf_text += "/F1 12 Tf\n"
-        pdf_text += f"({esc(line)}) Tj\n0 -18 Td\n"
-    pdf_text += "ET"
+            <h2>Execution & Quality Control</h2>
+            <div class="section">
+                <div class="detail-row"><span class="detail-label">Assigned Operator:</span><span class="detail-value">{assign_to}</span></div>
+                <div class="detail-row"><span class="detail-label">QC Status:</span><span class="detail-value" style="color: {'green' if qc_status == 'Pass' else 'red'}; font-weight: bold;">{qc_status}</span></div>
+            </div>
 
-    # Assemble the PDF structure (Standard PDF Boilerplate)
-    pdf = f"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R
-/MediaBox [0 0 612 792]
-/Resources << /Font << /F1 5 0 R >> >>
-/Contents 4 0 R
->>
-endobj
-4 0 obj
-<< /Length {len(pdf_text)} >>
-stream
-{pdf_text}
-endstream
-endobj
-5 0 obj
-<< /Type /Font
-   /Subtype /Type1
-   /BaseFont /Courier
->>
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000010 00000 n 
-0000000075 00000 n 
-0000000144 00000 n 
-0000000334 00000 n 
-0000000580 00000 n 
-trailer
-<< /Root 1 0 R /Size 6 >>
-startxref
-700
-%%EOF
-"""
+            <h2>Operator Notes</h2>
+            <div class="notes-box">{order.get('lamination_notes', 'No specific notes recorded by the operator.')}</div>
 
-    return pdf.encode("utf-8", errors="ignore")
+            <div class="footer">
+                Report Generated: {now_ist_formatted()} <br>
+                For Internal Use Only.
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_content.encode("utf-8")
 
 
 # ---------------------------------------------------
@@ -420,7 +413,7 @@ with tab1:
 
             st.divider()
 
-            # ---------------- FILE UPLOAD & SLIP DOWNLOAD ----------------
+            # ---------------- FILE UPLOAD & REPORT DOWNLOAD ----------------
             col_file, col_slip = st.columns(2)
 
             with col_file:
@@ -446,18 +439,18 @@ with tab1:
 
 
             with col_slip:
-                st.subheader("📄 Download Job Slip")
-                st.info("Ensure details are saved before generating slip.")
+                st.subheader("📄 Download Job Report")
+                st.info("The report is an HTML file. Open it and use your browser's 'Print to PDF' feature for a styled document.")
                 
-                slip_bytes = generate_lamination_slip(
+                report_bytes = generate_lamination_html_report(
                     o, film_type, temp, pressure, assign_to, qc_status
                 )
 
                 st.download_button(
-                    label="⬇ Download Lamination Slip (PDF)",
-                    data=slip_bytes,
-                    file_name=f"{order_id}_lamination_slip.pdf",
-                    mime="application/pdf",
+                    label="⬇ Download Lamination Report (HTML)",
+                    data=report_bytes,
+                    file_name=f"{order_id}_lamination_report.html",
+                    mime="text/html",
                     key=f"slip_dl_{order_id}",
                     use_container_width=True
                 )
