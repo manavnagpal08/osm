@@ -84,7 +84,7 @@ def inject_global_css():
         /* LOGIN SCREEN STYLING (Hidden sidebar, custom background) */
         /* ------------------------------------------------------------- */
         .stApp:has(.login-container) {
-            background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
+            background-image: url('https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh9JgbXkHFD_68MIoMrl8sOeanj-iPFaeHPB8IaMYuwcAsNAstm3ZYY9i33sPe4BKe-iwexUYISoCen0ZBSO8VV_JZG1R9Wszjv3yEyAL1BBZBn4xTarqdVloKEq9BLR6PNaBp47ao4ZdopDD3oVN1A0GIkNL0ijwB7R1eLKAYGv8LKht52gryczc57bUtS/s320/greb.png');
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
