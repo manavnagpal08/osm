@@ -66,7 +66,7 @@ def logout():
 # --- Custom CSS Injection ---
 
 def inject_global_css():
-    """Injects all global and local styles, optimized for the final beautiful sidebar."""
+    """Injects all global and local styles, optimized for the standard size and ultimate beautiful sidebar."""
     
     st.markdown("""
     <style>
@@ -78,7 +78,7 @@ def inject_global_css():
         }
 
         /* ------------------------------------------------------------- */
-        /* LOGIN SCREEN STYLING */
+        /* LOGIN SCREEN STYLING (Hidden sidebar, custom background) */
         /* ------------------------------------------------------------- */
         .stApp:has(.login-container) {
             background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
@@ -110,63 +110,63 @@ def inject_global_css():
         /* ... other login styles remain ... */
         
         /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING (The Ultimate Enhancement) */
+        /* ADMIN SIDEBAR STYLING (Standard Size & Ultimate Aesthetics) */
         /* ------------------------------------------------------------- */
         
-        /* Sidebar Container: Dark gradient and strong shadow */
+        /* Sidebar Container: Proper size (250px) and dark gradient */
         .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
-            /* Deeper, more contrasted gradient */
             background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
-            box-shadow: 4px 0 25px rgba(0,0,0,0.7); /* Deep shadow for maximum lift */
-            width: 280px !important; 
-            min-width: 280px !important; 
+            box-shadow: 4px 0 25px rgba(0,0,0,0.7);
+            /* Standard Sidebar Size */
+            width: 250px !important; 
+            min-width: 250px !important; 
             transition: all 0.3s ease-in-out;
         }
         
         /* Sidebar Header/Title Styling */
         .sidebar-header {
-            padding: 30px 20px 10px 20px;
-            color: #f6f9fc; /* Brighter white for header */
-            font-size: 28px; /* Slightly larger */
-            font-weight: 800; /* Extra bold */
+            padding: 25px 15px 10px 15px; /* Reduced padding for size */
+            color: #f6f9fc;
+            font-size: 24px; /* Reduced size for 250px width */
+            font-weight: 800;
             text-align: center;
             /* Gradient Underline */
             border-bottom: 2px solid;
-            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1; /* Vibrant blue gradient */
-            margin-bottom: 30px;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.5); /* Text shadow for header depth */
+            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
+            margin-bottom: 25px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
         }
 
         /* Navigation Links Container */
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 10px; } 
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } /* Reduced horizontal padding */
         
         /* FIX: Ensure all text elements are white/light for contrast, and add text shadow */
         [data-testid="stSidebar"] .stRadio label * {
-            color: #f6f9fc !important; /* Brighter white for all text */
-            text-shadow: 0 0 5px rgba(0, 0, 0, 0.4); /* Subtle shadow for text pop */
+            color: #f6f9fc !important;
+            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); /* Subtle text shadow */
         }
 
         /* Style the labels (the actual menu items) - Frosted Glass Look */
         [data-testid="stSidebar"] .stRadio label {
-            padding: 14px 15px; /* More padding */
-            margin-bottom: 8px; 
-            border-radius: 10px; 
+            padding: 12px 15px; /* Adjusted padding */
+            margin-bottom: 6px; 
+            border-radius: 8px; /* Slightly smaller radius for 250px width */
             
             /* Frosted Look */
-            background-color: rgba(255, 255, 255, 0.05); /* Very subtle transparency */
-            border: 1px solid rgba(255, 255, 255, 0.1); /* Thin light border */
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             
             transition: all 0.2s ease-in-out; 
             font-weight: 500;
-            font-size: 16px; /* Slightly larger font */
+            font-size: 15px; 
         }
         
         /* Hover state: Stronger glow and color change */
         [data-testid="stSidebar"] .stRadio label:hover {
-            background-color: rgba(0, 191, 255, 0.2); /* Light blue background hint */
-            color: #00BFFF !important; /* Electric Blue text */
-            transform: translateX(4px) scale(1.01); 
-            box-shadow: 0 4px 20px rgba(0, 191, 255, 0.3); /* Electric Blue glow */
+            background-color: rgba(0, 191, 255, 0.2);
+            color: #00BFFF !important;
+            transform: translateX(2px) scale(1.01); /* Reduced translation for 250px width */
+            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.3);
             cursor: pointer;
         }
         
@@ -179,17 +179,17 @@ def inject_global_css():
         [data-testid="stSidebar"] .stRadio input:checked + div > span {
             background-color: #00BFFF !important; /* Electric Blue */
             color: white !important; 
-            border-radius: 10px;
+            border-radius: 8px;
             font-weight: 700;
-            padding: 14px 15px;
-            box-shadow: 0 4px 20px rgba(0, 191, 255, 0.5); /* Stronger Electric Blue glow */
+            padding: 12px 15px;
+            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.5);
         }
 
         /* Logout Button Styling: Prominent and separated */
         [data-testid="stSidebar"] .stButton button {
             width: 90%;
-            margin: 40px 5% 20px 5%; /* Increased separation */
-            background-color: #1E90FF; /* Primary Dark Blue */
+            margin: 30px 5% 20px 5%;
+            background-color: #1E90FF;
             color: white;
             border: none;
             border-radius: 8px;
@@ -198,13 +198,13 @@ def inject_global_css():
             transition: all 0.2s;
         }
         [data-testid="stSidebar"] .stButton button:hover {
-            background-color: #00BFFF; /* Lighter blue on hover */
+            background-color: #00BFFF;
             transform: scale(1.02);
         }
     </style>
     """, unsafe_allow_html=True)
 
-# --- Login Screen ---
+# --- Login Screen (Kept identical) ---
 
 def login_screen():
     """Displays the login interface."""
