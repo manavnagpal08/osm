@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-# Assuming 'firebase' module handles connection (read, update, delete)
 from firebase import read, update, delete 
 from datetime import datetime, timezone, date, timedelta
 import time
@@ -13,7 +12,7 @@ DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
 FIREBASE_TIMEZONE = timezone.utc 
 
 # ------------------------------------------------------------------------------------
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (UNCHANGED)
 # ------------------------------------------------------------------------------------
 
 def get_current_firebase_time_str():
@@ -52,7 +51,7 @@ def calculate_priority_score(row):
     return base_score + modifier
 
 # ------------------------------------------------------------------------------------
-# STICKY FILTER AND SELECTION LOGIC (Query Params)
+# STICKY FILTER AND SELECTION LOGIC (UNCHANGED)
 # ------------------------------------------------------------------------------------
 
 def get_sticky_filter_state(key, default_value):
@@ -68,32 +67,29 @@ def get_sticky_filter_state(key, default_value):
 def set_sticky_filter_state(key, value):
     """Saves filter state to URL."""
     try:
-        # Check if the query parameter is already set to the value before attempting to change
         current_val = st.query_params.get(key)
         if current_val != str(value):
             st.query_params[key] = str(value)
     except Exception as e:
-        # This catch is mainly for cases where st.query_params is not fully ready
         pass
 
 def set_selected_order(firebase_id):
     """Sets the selected order ID in the query parameters and reruns."""
     set_sticky_filter_state("selected_order_id", firebase_id)
-    # Rerunning immediately to load the editor form
     st.rerun()
 
 # ------------------------------------------------------------------------------------
-# ADMIN ACCESS & PAGE SETUP
+# ADMIN ACCESS & PAGE SETUP (UNCHANGED)
 # ------------------------------------------------------------------------------------
 
-st.set_page_config(page_title="🔥 Productive Orders Admin Panel", layout="wide") 
+st.set_page_config(page_title="🚀 Supercharged Production Dashboard", layout="wide") 
 
 if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.error("❌ Access Denied — Admin Only")
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS 
+# LOAD & PRE-PROCESS ORDERS (UNCHANGED)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -166,18 +162,18 @@ def load_and_process_orders():
 df, stage_times, production_stages = load_and_process_orders()
 
 # ------------------------------------------------------------------------------------
-# ACTION FUNCTIONS
+# ACTION FUNCTIONS (UPDATED FOR BULK)
 # ------------------------------------------------------------------------------------
 
 def quick_advance_stage(current_firebase_id, current_stage):
-    """Advances an order to the next stage and logs the timestamp."""
+    """Advances a single order to the next stage and logs the timestamp."""
     
     current_index = production_stages.index(current_stage)
     if current_index < len(production_stages) - 1:
         next_stage = production_stages[current_index + 1]
     else:
-        st.warning(f"Order is already at the final stage: **{current_stage}**")
-        return
+        # If already at the last stage, return without updating
+        return f"Order is already at the final stage: **{current_stage}**", False
 
     timestamp_key = stage_times.get(next_stage)
     update_data = {
@@ -186,14 +182,36 @@ def quick_advance_stage(current_firebase_id, current_stage):
     }
 
     update(f"orders/{current_firebase_id}", update_data)
-    
-    st.toast(f"✅ Advanced order to **{next_stage}**! Timestamp logged.", icon='⏩')
+    return f"Advanced to **{next_stage}**.", True
+
+def bulk_advance_orders(firebase_ids):
+    """Advances multiple orders one stage forward."""
+    successful_updates = 0
+    for fid in firebase_ids:
+        # Fetch current stage for the order (necessary for the advance logic)
+        current_stage = df[df['firebase_id'] == fid]['stage'].iloc[0]
+        
+        _, success = quick_advance_stage(fid, current_stage)
+        if success:
+            successful_updates += 1
+            
+    st.toast(f"✅ Successfully advanced **{successful_updates}** orders to the next stage!", icon='🚀')
+    st.cache_data.clear() 
+    set_sticky_filter_state("selected_order_id", "") 
+    st.rerun()
+
+def bulk_update_priority(firebase_ids, new_priority):
+    """Updates the priority for multiple orders."""
+    for fid in firebase_ids:
+        update(f"orders/{fid}", {'priority': new_priority})
+            
+    st.toast(f"✅ Successfully set priority to **{new_priority}** for **{len(firebase_ids)}** orders.", icon='🌟')
     st.cache_data.clear() 
     set_sticky_filter_state("selected_order_id", "") 
     st.rerun()
 
 def save_order_updates(firebase_id, order_id, new_priority, new_qty, new_due_date):
-    """Saves bulk updates to Firebase using the safe single-item approach."""
+    """Saves updates for a single order."""
     update_data = {
         'priority': new_priority,
         'qty': int(new_qty),
@@ -270,7 +288,7 @@ if df_filtered.empty:
     st.warning("No orders match the current filter criteria.")
 
 
-# Select columns for display (Read-only)
+# Select columns for display 
 df_display = df_filtered[[
     "order_id", "customer", "item", "Qty", 
     "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score", "firebase_id"
@@ -282,110 +300,107 @@ df_display = df_filtered[[
     "priority": "Priority",
     "Time_To_Deadline": "Deadline (Days)",
     "Priority_Score": "Score",
-    "firebase_id": "Firebase ID" # Used for selection lookup
+    "firebase_id": "Firebase ID" 
 })
 
-# --- ORDER SELECTION AND EDIT FORM ---
+# --- ORDER SELECTION AND EDIT FORM (Single Item) ---
 selected_order_id = get_sticky_filter_state("selected_order_id", None)
 
 if selected_order_id:
-    # Safely retrieve the selected row using the Firebase ID
+    # --- DEDICATED EDIT FORM (Single-row productivity) ---
     selected_row = df_display[df_display['Firebase ID'] == selected_order_id]
     
     if not selected_row.empty:
         selected_row_data = selected_row.iloc[0]
         st.markdown(f"## 🛠️ Edit & Advance Order: **{selected_row_data['Order ID']}**")
-        st.info(f"Current Stage: **{selected_row_data['Stage']}** | Customer: **{selected_row_data['Customer']}**")
+        st.info(f"Current Stage: **{selected_row_data['Stage']}** | Priority: **{selected_row_data['Priority']}** | Score: **{selected_row_data['Score']:.1f}**")
         
-        # --- Form for bulk edit ---
         with st.form("edit_order_form", clear_on_submit=False):
             col_e1, col_e2, col_e3 = st.columns(3)
             
             new_priority = col_e1.selectbox(
-                "Priority",
-                ["High", "Medium", "Low"],
+                "Priority", ["High", "Medium", "Low"],
                 index=["High", "Medium", "Low"].index(selected_row_data['Priority']),
                 key="edit_priority"
             )
             new_qty = col_e2.number_input(
-                "Quantity (Qty)",
-                min_value=0,
-                value=int(selected_row_data['Qty']),
-                key="edit_qty"
+                "Quantity (Qty)", min_value=0, value=int(selected_row_data['Qty']), key="edit_qty"
             )
             new_due_date = col_e3.date_input(
-                "Due Date",
-                # Ensure date is convertible to datetime before setting value
+                "Due Date", 
                 value=pd.to_datetime(selected_row_data['Due_Date']).date() if pd.notna(selected_row_data['Due_Date']) else date.today(),
                 key="edit_due_date"
             )
 
             c_actions, c_cancel = st.columns([3, 1])
             
-            # Save Button
             if c_actions.form_submit_button("💾 Save All Changes (Priority, Qty, Date)", type="primary"):
-                save_order_updates(
-                    selected_order_id, 
-                    selected_row_data['Order ID'], 
-                    new_priority, 
-                    new_qty, 
-                    new_due_date
-                )
+                save_order_updates(selected_order_id, selected_row_data['Order ID'], new_priority, new_qty, new_due_date)
             
-            # Cancel Button
             if c_cancel.form_submit_button("❌ Cancel Edit", type="secondary"):
                 set_sticky_filter_state("selected_order_id", "") 
                 st.rerun()
 
-        # --- Quick Stage Advance Button ---
         st.markdown("### Quick Actions")
-        
         if st.button("⏩ Advance to Next Stage", help="Move the order one step forward and log the time.", type="warning"):
             quick_advance_stage(selected_order_id, selected_row_data['Stage'])
 
         st.markdown("---")
 
     else:
-        # Clear selected ID if it no longer exists (e.g., deleted or filter changed)
         set_sticky_filter_state("selected_order_id", "") 
         st.rerun()
 
-# --- DISPLAY ORDERS (Now used for selection) ---
+# --- DISPLAY ORDERS AND BULK ACTIONS ---
 
-st.markdown("## 📋 Order Management Spaces (Click any row to Edit)")
+st.markdown("## 📋 Order Management Spaces (Select multiple rows for Bulk Actions)")
 
 tab1, tab2, tab3 = st.tabs(["**All Filtered Orders**", "**Pending Orders** ⏳", "**Stored Products** 📦"])
 
-# Function to render selectable DataFrame (FIXED)
+# Initialize session state for selected rows if not present
+if 'selected_firebase_ids' not in st.session_state:
+    st.session_state['selected_firebase_ids'] = []
+
 def render_selectable_dataframe(df_to_render, key_suffix=""):
-    """Renders a dataframe and handles row selection using Streamlit's robust selection mode."""
+    """Renders a dataframe supporting multi-row selection for bulk actions."""
     
-    # Drop Firebase ID before passing to the UI
     df_render = df_to_render.drop(columns=['Firebase ID'])
     
+    # Define styling for urgency
+    column_config = {
+        "Deadline (Days)": st.column_config.NumberColumn(
+            "Deadline (Days)",
+            format="%.1f days",
+            # Apply styling using Python-native conditional formatting
+            help="Negative days means overdue. Click a row for single-item edit."
+        ),
+    }
+
     selected_indices_container = st.dataframe(
         df_render,
         hide_index=True,
         use_container_width=True,
         key=f"data_frame_{key_suffix}",
-        selection_mode="single-row",
-        column_order=df_render.columns.tolist() # Maintain column order consistency
+        selection_mode="multi-row", # Changed to MULTI-ROW
+        column_order=df_render.columns.tolist(),
+        column_config=column_config
     )
     
-    # 🐛 FIX: Safely check and process the selection dictionary
+    # Get the indices of the selected rows in the displayed/rendered dataframe
     selection = selected_indices_container.get('selection')
     if selection and selection.get('rows'):
-        # Get the positional index (0-based) of the selected row in df_render
-        position = selection['rows'][0]
+        selected_positions = selection['rows']
         
-        # Use the positional index to safely retrieve the Firebase ID from the original df_to_render
-        # This is safe because df_to_render is guaranteed to have the same order as df_render
-        selected_firebase_id = df_to_render.iloc[position]['Firebase ID']
-        set_selected_order(selected_firebase_id)
+        # Map the positional indices back to the unique Firebase IDs
+        selected_firebase_ids = df_to_render.iloc[selected_positions]['Firebase ID'].tolist()
+        st.session_state['selected_firebase_ids'] = selected_firebase_ids
+    else:
+        st.session_state['selected_firebase_ids'] = []
 
 
 with tab1:
     st.markdown("### All Orders (Filtered View)")
+    # Sort by Score (descending) by default to show urgent orders first
     render_selectable_dataframe(
         df_display.sort_values(by="Score", ascending=False), 
         key_suffix="all"
@@ -415,32 +430,51 @@ with tab3:
             key_suffix="stored"
         )
 
-st.markdown("---")
-
-## ⚡ Actions
-colA, colB = st.columns(2)
-
-csv_export = df_filtered.to_csv(index=False).encode()
-colA.download_button(
-    "📥 Export Filtered Data to CSV", csv_export, "orders_filtered_export.csv", "text/csv"
-)
-
-if colB.button("🗑️ Delete ALL Orders", type="secondary"):
-    if st.session_state.get("confirm_delete_all") != True:
-        st.session_state["confirm_delete_all"] = True
-        st.warning("⚠️ Are you sure? Click again to confirm **DELETION OF ALL** orders.")
-    else:
-        with st.spinner("Deleting all orders..."):
-            for key in df["firebase_id"]:
-                delete(f"orders/{key}")
-            st.success("All orders deleted.")
-            st.session_state.pop("confirm_delete_all", None)
-            st.cache_data.clear() 
-            st.rerun()
+# --- BULK ACTIONS PANEL ---
+selected_ids = st.session_state.get('selected_firebase_ids', [])
 
 st.markdown("---")
+st.markdown("## 🎯 Bulk Actions")
 
-## 📈 Advanced Analytics Dashboard
+if selected_ids:
+    st.success(f"**{len(selected_ids)}** orders selected for bulk actions.")
+    
+    col_bulk1, col_bulk2, col_bulk3 = st.columns(3)
+    
+    # Bulk Advance Button
+    if col_bulk1.button(f"⏩ Bulk Advance {len(selected_ids)} Orders", type="warning", key="bulk_advance_btn"):
+        bulk_advance_orders(selected_ids)
+        
+    # Bulk Priority Update
+    with col_bulk2.form("bulk_priority_form", clear_on_submit=True):
+        new_bulk_priority = st.selectbox(
+            "Set Priority to:",
+            ["High", "Medium", "Low"],
+            key="bulk_priority_select"
+        )
+        if st.form_submit_button(f"🌟 Set Priority for {len(selected_ids)} Orders", type="primary"):
+            bulk_update_priority(selected_ids, new_bulk_priority)
+
+    # Bulk Delete (Re-using the delete logic for selected)
+    if col_bulk3.button(f"🗑️ Delete {len(selected_ids)} Selected Orders", type="secondary", key="bulk_delete_btn"):
+        if st.session_state.get("confirm_delete_bulk") != True:
+            st.session_state["confirm_delete_bulk"] = True
+            col_bulk3.warning(f"⚠️ Are you sure? Click again to confirm **DELETION OF {len(selected_ids)}** orders.")
+        else:
+            with st.spinner(f"Deleting {len(selected_ids)} orders..."):
+                for fid in selected_ids:
+                    delete(f"orders/{fid}")
+                st.success(f"**{len(selected_ids)}** selected orders deleted.")
+                st.session_state.pop("confirm_delete_bulk", None)
+                st.cache_data.clear() 
+                st.rerun()
+                
+else:
+    st.info("Select one or more rows in the tables above to enable bulk actions.")
+
+st.markdown("---")
+
+## 📈 Advanced Analytics Dashboard (UNCHANGED)
 
 col_an1, col_an2 = st.columns(2)
 
