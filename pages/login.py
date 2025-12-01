@@ -23,7 +23,7 @@ st.title("🔐 Login to OMS")
 # HARDCODED USER DATABASE
 # ---------------------------
 USERS = {
-    "admin1": {"password": "admin123", "role": "admin"},
+    "admin2": {"password": "admin123", "role": "admin"},
     "design01": {"password": "design123", "role": "design"},
     "print01": {"password": "print123", "role": "printing"},
     "die01": {"password": "die123", "role": "diecut"},
