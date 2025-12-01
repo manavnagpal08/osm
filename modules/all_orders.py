@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from firebase import read, update, delete # Assuming 'firebase' module handles connection
+from firebase import read, update, delete
 from datetime import datetime, timezone
 import base64
 import io
@@ -10,7 +10,6 @@ import time
 
 # --- CONFIGURATION ---
 DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
-# Assuming Firebase stores UTC timestamps
 FIREBASE_TIMEZONE = timezone.utc 
 
 # ------------------------------------------------------------------------------------
@@ -19,7 +18,6 @@ FIREBASE_TIMEZONE = timezone.utc
 
 def get_current_firebase_time_str():
     """Returns the current UTC time in ISO format for Firebase storage."""
-    # Use 'Z' for Zulu/UTC time
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 def to_datetime_utc(x):
@@ -27,20 +25,16 @@ def to_datetime_utc(x):
     if not x:
         return None
     try:
-        # Handles both standard ISO and the 'Z' format
         dt = datetime.fromisoformat(str(x).replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            # Assume naive timestamp is UTC if it came from Firebase
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
-        # Handle cases where conversion fails, returning None
         return None
 
 def format_df_date_display(d):
     """Converts a time value to a simple YYYY-MM-DD string for st.data_editor."""
     try:
-        # For the Data Editor, we want a simple string format
         dt = to_datetime_utc(d)
         return dt.strftime("%Y-%m-%d") if dt else "N/A"
     except:
@@ -63,30 +57,16 @@ def get_sticky_filter_state(key, default_value):
 def set_sticky_filter_state(key, value):
     """Saves filter state to URL."""
     try:
-        # Only update if value is different to avoid infinite reruns
         if st.query_params.get(key) != str(value):
             st.query_params[key] = str(value)
     except Exception as e:
         st.error(f"Error saving filter state for {key}: {e}")
 
 # ------------------------------------------------------------------------------------
-# ADMIN ACCESS & PAGE SETUP
-# ------------------------------------------------------------------------------------
-st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide")
-
-if "role" not in st.session_state or st.session_state["role"] != "admin":
-    st.error("❌ Access Denied — Admin Only")
-    st.stop()
-
-st.title("🛡️ Admin — Orders Management & Advanced Analytics")
-st.markdown("---")
-
-
-# ------------------------------------------------------------------------------------
 # LOAD & PRE-PROCESS ORDERS (Includes fix for DatetimeArray error)
 # ------------------------------------------------------------------------------------
 
-@st.cache_data(ttl=60) # Cache the data for 60 seconds
+@st.cache_data(ttl=60)
 def load_and_process_orders():
     """Loads orders from Firebase and performs initial data cleaning."""
     orders = read("orders") or {}
@@ -94,7 +74,6 @@ def load_and_process_orders():
     for key, o in orders.items():
         if isinstance(o, dict):
             o["firebase_id"] = key
-            # Ensure 'qty' is present for KPI calculation
             if 'qty' not in o or o['qty'] is None:
                 o['qty'] = 0 
             data.append(o)
@@ -104,13 +83,11 @@ def load_and_process_orders():
     if df.empty:
         return pd.DataFrame(), {}, []
 
-    # Define the production stages in order
     production_stages = [
         "Received", "Design", "Printing", "Lamination",
         "DieCut", "Assembly", "Storage", "Dispatch", "Completed"
     ]
 
-    # Map stage to the completion timestamp field
     stage_times = {
         "Received": "received", 
         "Design": "design_completed_at",
@@ -126,14 +103,12 @@ def load_and_process_orders():
     # Data Quality: Convert all time fields to a uniform UTC datetime dtype
     for key in stage_times.values():
         if key in df.columns:
-            # FIX: Use pd.to_datetime with errors='coerce' to force conversion
-            # and turn any bad values into NaT, avoiding the ndarray error.
+            # FIX: Force conversion to datetime64[ns, UTC]
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
 
 
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
-    # Use original 'due' column for date conversion
     df["Due_Date"] = df['due'].apply(format_df_date_display)
     
     # Calculate Time-In-Stage (Advanced Metric)
@@ -145,10 +120,8 @@ def load_and_process_orders():
 
         if start_col in df.columns and end_col in df.columns:
             
-            # The subtraction now works because both columns are pd.to_datetime dtype
             duration_timedelta = (df[end_col] - df[start_col])
             
-            # Calculate total seconds and convert to hours.
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
@@ -162,6 +135,17 @@ if df.empty:
     st.warning("No orders found in the system.")
     st.stop()
     
+# ------------------------------------------------------------------------------------
+# ADMIN ACCESS & PAGE SETUP
+# ------------------------------------------------------------------------------------
+if "role" not in st.session_state or st.session_state["role"] != "admin":
+    st.error("❌ Access Denied — Admin Only")
+    st.stop()
+st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide") # Moved page_config here
+
+st.title("🛡️ Admin — Orders Management & Advanced Analytics")
+st.markdown("---")
+
 # ------------------------------------------------------------------------------------
 # KPI Cards
 # ------------------------------------------------------------------------------------
@@ -185,7 +169,6 @@ st.markdown("## 🔍 Order Filtering")
 with st.expander("Filter Options"):
     c1, c2 = st.columns(2)
 
-    # Sticky Filters: Read from URL
     default_stage = get_sticky_filter_state("stage", "All")
     default_priority = get_sticky_filter_state("priority", "All")
     
@@ -242,10 +225,10 @@ column_config = {
     "Stage": st.column_config.TextColumn("Stage", disabled=True),
     "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
     "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True),
-    "Firebase ID": st.column_config.Column("Firebase ID", disabled=True, visible=False)
+    # FIX APPLIED: Removed 'visible=False' as it's not supported. 
+    "Firebase ID": st.column_config.Column("Firebase ID", disabled=True) 
 }
 
-# st.data_editor handles Inline Editing, Instant Search, Column Sorting, and Pagination
 edited_df = st.data_editor(
     df_display,
     column_config=column_config,
@@ -262,7 +245,6 @@ if st.session_state.orders_data_editor['edited_rows']:
     edited_rows = st.session_state.orders_data_editor['edited_rows']
     
     for index, edits in edited_rows.items():
-        # Get the original index in df_filtered to retrieve the correct firebase_id
         original_firebase_id = df_filtered.iloc[index]['firebase_id']
         update_data = {}
         
@@ -276,9 +258,7 @@ if st.session_state.orders_data_editor['edited_rows']:
         if 'Priority' in edits:
             update_data['priority'] = edits['Priority']
         if 'Due_Date' in edits:
-            # Convert YYYY-MM-DD back to ISO format for Firebase storage (UTC)
             try:
-                # Parse date string as naive, then localize to UTC before converting to ISO string
                 dt_obj = datetime.strptime(edits['Due_Date'], "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
                 update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
             except ValueError:
@@ -286,13 +266,11 @@ if st.session_state.orders_data_editor['edited_rows']:
                 continue
 
         if update_data:
-            # Update data in Firebase
             update(f"orders/{original_firebase_id}", update_data)
             st.toast(f"✅ Updated Order ID: {df_filtered.iloc[index]['Order ID']}", icon='💾')
 
-    # Wait briefly and force a rerun to reload fresh data from Firebase and clear the editor state
     time.sleep(0.5) 
-    st.session_state.orders_data_editor['edited_rows'] = {} # Clear state manually
+    st.session_state.orders_data_editor['edited_rows'] = {}
     st.cache_data.clear()
     st.rerun()
 
@@ -343,7 +321,6 @@ with col_an1:
 # Monthly production
 with col_an2:
     st.markdown("### 🗓️ Monthly Orders Volume")
-    # Ensure 'received' is a datetime object before using dt accessor
     df["received_month"] = df["received"].dt.to_period("M").astype(str)
     
     fig_m = px.bar(
@@ -368,7 +345,6 @@ if stage_duration_cols:
     
     dept_times_avg["Department"] = dept_times_avg["Duration_Column"].str.replace('_duration_hours', '')
 
-    # Filter out stages with 0 or NaN average time
     df_d = dept_times_avg[dept_times_avg["AvgHours"] > 0.01].dropna() 
 
     if not df_d.empty:
