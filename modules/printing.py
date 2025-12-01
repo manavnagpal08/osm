@@ -9,13 +9,11 @@ st.set_page_config(page_title="Printing Department", layout="wide", page_icon="�
 # ---------------------------
 # ROLE CHECK
 # ---------------------------
-# Determine if the current user is an admin
 IS_ADMIN = st.session_state.get("role") == "admin"
 
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
-# Printing users and Admin can access this page
 if st.session_state["role"] not in ["printing", "admin"]:
     st.error("❌ You do not have permission to access this page.")
     st.stop()
@@ -325,7 +323,9 @@ with tab1:
             mockup_files = o.get("printing_mockups", {})
             
             printing_specs = o.get("printing_specs", {})
-            admin_notes = o.get("admin_notes", "No specific instructions from Admin/Sales.")
+            
+            # Fetch admin notes from order data
+            current_admin_notes = o.get("admin_notes", "No specific instructions from Admin/Sales.")
             
             with st.container(border=True):
                 
@@ -362,11 +362,10 @@ with tab1:
                 # ===============================================
                 st.subheader("⚙️ Specifications & Assignment")
                 
-                # Use a specific layout for assignment based on role
+                # Layout based on role (Admin gets 4 columns, Printer gets 3 fields + 1 read-only assignment)
                 if IS_ADMIN:
                     a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
                 else:
-                    # Printing users don't need the assignment select box
                     a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
                 
                 current_assignee = printing_specs.get("assigned_to", "Unassigned")
@@ -383,8 +382,8 @@ with tab1:
                         )
                     else:
                         # Printing team sees read-only text
-                        st.text_input("Assigned To", value=current_assignee, disabled=True, key=f"assign_ro_{key}")
-                        new_assignee = current_assignee # Keep current value for save operation
+                        st.text_input("Assigned To (Admin Only)", value=current_assignee, disabled=True, key=f"assign_ro_{key}")
+                        new_assignee = current_assignee # Keep current value for save operation (if admin changes other specs)
 
                 # Paper Quality
                 with pq_col:
@@ -413,10 +412,10 @@ with tab1:
                         key=f"bs_{key}"
                     )
 
-                # Save Specs Button
+                # Save Specs Button (Handles assignment if Admin, and specs if Admin/Printer)
                 if st.button("💾 Save Specifications", key=f"save_specs_{key}", type="secondary", use_container_width=True):
                     updated_specs = {
-                        "assigned_to": new_assignee, # Uses the selected value if admin, or the read-only value if printer
+                        "assigned_to": new_assignee, 
                         "paper_quality": new_paper_quality,
                         "paper_size": new_paper_size,
                         "board_size": new_board_size
@@ -500,15 +499,26 @@ with tab1:
                 msg_admin, msg_print = st.columns(2)
                 
                 with msg_admin:
-                    st.markdown("### 🗣️ Communication Log")
-                    st.caption("Notes from Admin/Sales team.")
-                    st.text_area(
+                    st.markdown("### 🗣️ Communication Log (Admin/Sales)")
+                    
+                    # --- BUG FIX IMPLEMENTED HERE ---
+                    # Admin can edit, others see read-only.
+                    new_admin_notes = st.text_area(
                         "Admin/Sales Notes",
-                        value=admin_notes,
+                        value=current_admin_notes,
                         height=120,
-                        disabled=True, 
+                        disabled=not IS_ADMIN, # ONLY ADMIN can change this
                         key=f"admin_msg_{key}"
                     )
+                    
+                    if IS_ADMIN and st.button("✍️ Save Admin Notes", key=f"save_admin_notes_{key}", type="secondary", use_container_width=True):
+                        update(f"orders/{key}", {"admin_notes": new_admin_notes})
+                        st.toast("Admin notes saved!", icon="✍️")
+                        st.rerun()
+                    elif not IS_ADMIN:
+                        st.caption("This field is read-only for the Printing Department.")
+                    # -----------------------------------
+                    
 
                 with msg_print:
                     st.markdown("### ✍️ Printing Team Notes")
@@ -522,10 +532,8 @@ with tab1:
                     )
                     
                     if st.button("💾 Save Printing Notes", key=f"save_print_notes_{key}", use_container_width=True):
-                        # Note: We must re-fetch specs here to ensure we don't overwrite non-admin changes (like assignment)
                         current_specs_before_save = read(f"orders/{key}").get("printing_specs", {})
                         
-                        # Preserve all existing specs, only update the notes field
                         current_specs_before_save["printing_notes"] = new_print_notes
                         update(f"orders/{key}", {"printing_specs": current_specs_before_save})
                         st.toast("Printing notes saved!", icon="💾")
@@ -629,8 +637,10 @@ with tab2:
                 note_col1, note_col2 = st.columns(2)
                 
                 with note_col1:
+                    # Display Admin notes
                     st.info(f"**Admin/Sales Note:** {o.get('admin_notes', 'N/A')}")
                 with note_col2:
+                    # Display Printing notes
                     st.info(f"**Printing Note:** {printing_specs.get('printing_notes', 'N/A')}")
                 
                 st.markdown("---")
