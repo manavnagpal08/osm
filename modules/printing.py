@@ -17,7 +17,7 @@ if st.session_state["role"] not in ["printing", "admin"]:
     st.stop()
 
 st.title("🖨️ Printing Department")
-st.caption("Manage print jobs, preview artwork, and upload mockup files.")
+st.caption("Manage print jobs, material specs, and track communication.")
 
 # ========================================================
 # TIME HELPERS — IST FORMAT
@@ -34,9 +34,15 @@ def now_ist_formatted():
 
 
 # ---------------------------
-# LOAD ORDERS
+# LOAD ORDERS & USERS
 # ---------------------------
 orders = read("orders") or {}
+# Assuming you have a 'users' collection with names/roles
+users = read("users") or {} 
+printer_names = ["Unassigned"] + [u['name'] for u in users.values() if u.get('role') == 'printing'] 
+# Fallback if no users list is available
+if not printer_names:
+    printer_names = ["Unassigned", "Printer A", "Printer B"] 
 
 pending = {}
 completed = {}
@@ -51,7 +57,7 @@ for key, o in orders.items():
         completed[key] = o
 
 # ---------------------------
-# FILE UTILITIES
+# FILE UTILITIES (Kept the same for brevity)
 # ---------------------------
 
 def file_download_button(label, file_entry, order_id, file_label, key_prefix):
@@ -60,9 +66,8 @@ def file_download_button(label, file_entry, order_id, file_label, key_prefix):
         st.warning("No file available for download.")
         return
     
-    # Extract Base64 data and extension from the file entry dictionary
     b64_data = file_entry.get("data")
-    file_ext = file_entry.get("ext", "bin") # Use stored extension, default to bin
+    file_ext = file_entry.get("ext", "bin") 
 
     try:
         raw = base64.b64decode(b64_data)
@@ -70,7 +75,6 @@ def file_download_button(label, file_entry, order_id, file_label, key_prefix):
         st.error("File decode failed!")
         return
 
-    # Determine MIME type based on the stored extension
     mime_map = {
         "pdf":  "application/pdf",
         "jpg":  "image/jpeg",
@@ -139,51 +143,104 @@ with tab1:
             order_id = o.get("order_id")
             design_files = o.get("design_files", {})
             mockup_files = o.get("printing_mockups", {})
-
+            
+            # Load existing specs/notes
+            printing_specs = o.get("printing_specs", {})
+            admin_notes = o.get("admin_notes", "No specific instructions from Admin/Sales.")
+            
             with st.container(border=True):
 
                 st.subheader(f"🖨️ Order {order_id} — {o.get('customer')}")
-                st.markdown(f"**Item:** {o.get('item')} | **Quantity:** {o.get('qty')}")
+                st.markdown(f"**Item:** {o.get('item')} | **Quantity:** {o.get('qty')} | **Due:** {o.get('due')}")
 
                 st.divider()
 
-                col1, col2 = st.columns(2)
+                # ===============================================
+                # ROW 1: Assignment and Specs
+                # ===============================================
+                st.markdown("### ⚙️ Printing Specs & Assignment")
+                a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
 
-                # ----------------------------
+                # Assigned To (Selectbox)
+                with a_col:
+                    current_assignee = printing_specs.get("assigned_to", "Unassigned")
+                    new_assignee = st.selectbox(
+                        "Assigned To",
+                        options=printer_names,
+                        index=printer_names.index(current_assignee) if current_assignee in printer_names else 0,
+                        key=f"assign_{key}"
+                    )
+                
+                # Paper Quality
+                with pq_col:
+                    new_paper_quality = st.text_input(
+                        "Paper Quality (e.g., 300GSM Matt)",
+                        value=printing_specs.get("paper_quality", ""),
+                        key=f"pq_{key}"
+                    )
+
+                # Paper Size
+                with ps_col:
+                    new_paper_size = st.text_input(
+                        "Paper Size (e.g., 19x25)",
+                        value=printing_specs.get("paper_size", ""),
+                        key=f"ps_{key}"
+                    )
+
+                # Board Size
+                with bs_col:
+                    new_board_size = st.text_input(
+                        "Board Size (Optional)",
+                        value=printing_specs.get("board_size", ""),
+                        key=f"bs_{key}"
+                    )
+
+                # Save Specs Button
+                if st.button("💾 Save Specs & Assignment", key=f"save_specs_{key}", use_container_width=True):
+                    updated_specs = {
+                        "assigned_to": new_assignee,
+                        "paper_quality": new_paper_quality,
+                        "paper_size": new_paper_size,
+                        "board_size": new_board_size
+                    }
+                    update(f"orders/{key}", {"printing_specs": updated_specs})
+                    st.toast("Printing specs and assignment saved!", icon="💾")
+                    st.rerun()
+
+                st.divider()
+
+                # ===============================================
+                # ROW 2: Files
+                # ===============================================
+                col1, col2 = st.columns(2)
+                
                 # PRINT READY FILE (from Design)
-                # ----------------------------
                 with col1:
                     st.subheader("🎨 Print-Ready File (Final Art)")
-
-                    # Final art is stored as a dictionary in design_files
                     final_art_entry = design_files.get("final") 
                     
                     if not final_art_entry:
                         st.error("❌ Final design file missing! Cannot proceed.")
                     else:
                         preview_file("Print Ready File", final_art_entry)
-
                         file_download_button(
                             "⬇️ Download Print Ready File",
-                            final_art_entry, # Pass the dictionary entry
+                            final_art_entry, 
                             order_id,
                             "print_ready",
-                            f"dl_ready_{key}" # Unique key
+                            f"dl_ready_{key}"
                         )
 
-                # ----------------------------
                 # MOCKUP FILE (upload)
-                # ----------------------------
                 with col2:
                     st.subheader("🖼️ Upload Mockup File")
-
                     upload = st.file_uploader(
                         "Upload finished product mockup (JPG, PNG, PDF)", 
                         type=["png", "jpg", "jpeg", "pdf"], 
-                        key=f"mockup_upload_{key}" # Unique key
+                        key=f"mockup_upload_{key}"
                     )
                     
-                    mock_b64 = mockup_files.get("mockup")
+                    mock_entry = mockup_files.get("mockup")
                     
                     if st.button("💾 Save Mockup", key=f"save_mockup_{key}", use_container_width=True, disabled=not upload):
                         if upload:
@@ -192,29 +249,58 @@ with tab1:
                             ext = upload.name.split(".")[-1].lower()
                             
                             new_mockup_entry = {"data": encoded, "ext": ext}
-
                             update(f"orders/{key}", {"printing_mockups": {"mockup": new_mockup_entry}})
 
                             st.success("Mockup saved!")
                             st.rerun()
 
-                    # Show existing mockup preview
-                    if mock_b64:
-                        preview_file("Mockup", mock_b64)
-
+                    if mock_entry:
+                        preview_file("Mockup", mock_entry)
                         file_download_button(
                             "⬇️ Download Mockup File",
-                            mock_b64, # Pass the dictionary entry
+                            mock_entry,
                             order_id,
                             "mockup",
-                            f"dl_mock_{key}" # Unique key
+                            f"dl_mock_{key}"
                         )
 
                 st.divider()
 
-                # ----------------------------
-                # COMPLETE PRINTING
-                # ----------------------------
+                # ===============================================
+                # ROW 3: Messages and Completion
+                # ===============================================
+                msg_admin, msg_print = st.columns(2)
+                
+                with msg_admin:
+                    st.markdown("### 💬 Message from Admin/Sales")
+                    st.text_area(
+                        "Admin/Sales Notes",
+                        value=admin_notes,
+                        height=150,
+                        disabled=True, # Read-only
+                        key=f"admin_msg_{key}"
+                    )
+
+                with msg_print:
+                    st.markdown("### ✍️ Printing Department Notes")
+                    current_print_notes = printing_specs.get("printing_notes", "")
+                    new_print_notes = st.text_area(
+                        "Add/Edit Printing Notes",
+                        value=current_print_notes,
+                        height=150,
+                        key=f"print_notes_{key}"
+                    )
+                    
+                    if st.button("💾 Save Printing Notes", key=f"save_print_notes_{key}", use_container_width=True):
+                        # Merge the new note with existing specs
+                        printing_specs["printing_notes"] = new_print_notes
+                        update(f"orders/{key}", {"printing_specs": printing_specs})
+                        st.toast("Printing notes saved!", icon="💾")
+                        st.rerun()
+
+                st.divider()
+                
+                # COMPLETE PRINTING BUTTON
                 if st.button(f"🚀 Move to Lamination", key=f"done_{key}", type="primary", use_container_width=True):
 
                     now_raw = now_ist_raw()
@@ -233,6 +319,8 @@ with tab1:
 # ---------------------------
 with tab2:
 
+    st.header("✅ Completed Printing")
+    
     if not completed:
         st.info("No completed printing orders yet.")
     else:
@@ -241,11 +329,17 @@ with tab2:
             order_id = o.get("order_id")
             design_files = o.get("design_files", {})
             mockup_files = o.get("printing_mockups", {})
+            printing_specs = o.get("printing_specs", {})
 
             with st.container(border=True):
 
                 st.subheader(f"✔ {order_id} — {o.get('customer')}")
-                st.caption(f"Finished: {o.get('printing_completed_at','N/A')}")
+                st.caption(f"Finished: {o.get('printing_completed_at','N/A')} | Assigned: {printing_specs.get('assigned_to', 'N/A')}")
+
+                spec_cols = st.columns(3)
+                spec_cols[0].write(f"**Paper Quality:** {printing_specs.get('paper_quality', 'N/A')}")
+                spec_cols[1].write(f"**Paper Size:** {printing_specs.get('paper_size', 'N/A')}")
+                spec_cols[2].write(f"**Board Size:** {printing_specs.get('board_size', 'N/A')}")
 
                 st.divider()
 
@@ -260,10 +354,10 @@ with tab2:
                         preview_file("Print Ready File", final_art_entry)
                         file_download_button(
                             "⬇️ Download Print Ready File",
-                            final_art_entry, # Pass the dictionary entry
+                            final_art_entry,
                             order_id,
                             "print_ready",
-                            f"comp_dl_ready_{key}" # Unique key
+                            f"comp_dl_ready_{key}"
                         )
 
                 # Mockup File Preview (Completed)
@@ -275,10 +369,14 @@ with tab2:
                         preview_file("Mockup", mockup_entry)
                         file_download_button(
                             "⬇️ Download Mockup File",
-                            mockup_entry, # Pass the dictionary entry
+                            mockup_entry,
                             order_id,
                             "mockup",
-                            f"comp_dl_mock_{key}" # Unique key
+                            f"comp_dl_mock_{key}"
                         )
 
+                st.divider()
+                st.markdown("### 💬 Notes Log")
+                st.write(f"**Admin/Sales Note:** {o.get('admin_notes', 'N/A')}")
+                st.write(f"**Printing Note:** {printing_specs.get('printing_notes', 'N/A')}")
                 st.divider()
