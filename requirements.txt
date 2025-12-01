@@ -4,5 +4,6 @@ python-dateutil
 qrcode
 fpdf
 reportlab
-
+Pillow
 barcode
+python-barcode
