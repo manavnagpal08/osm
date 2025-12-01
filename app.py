@@ -76,29 +76,27 @@ def inject_global_css():
         .stApp {
             /* Set the overall background of the application (excluding sidebar) to pure white */
             background-color: #FFFFFF; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Poppins', sans-serif; /* Use a modern font (if available) */
         }
 
         /* ------------------------------------------------------------- */
-        /* LOGIN SCREEN STYLING: ONLY when .login-container is present */
+        /* LOGIN SCREEN STYLING: Hidden elements & Background Image */
         /* ------------------------------------------------------------- */
         .stApp:has(.login-container) {
-            /* Show background image ONLY during login */
             background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
-            background-color: transparent; /* Ensure image is visible */
+            background-color: transparent;
         }
         
         .stApp:has(.login-container) [data-testid="stHeader"], 
         .stApp:has(.login-container) [data-testid="stToolbar"], 
         .stApp:has(.login-container) [data-testid="stSidebar"] {
-            /* Hide Sidebar, Header, and Menu only during login */
             display: none !important;
         }
 
-        /* Login Card (Glassmorphism effect) - Kept the stylish login */
+        /* Login Card Styles (Kept the stylish glassmorphism) */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
@@ -114,71 +112,86 @@ def inject_global_css():
         /* ... other login styles remain ... */
         
         /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING (Post-Login Enhancement) */
+        /* ADMIN SIDEBAR STYLING (Premium Enhancement) */
         /* ------------------------------------------------------------- */
         
-        /* Show/Expand Sidebar ONLY for Admin - Give it a distinct color */
+        /* Sidebar Container: Dark gradient and strong shadow */
         .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
-            background-color: #2c3e50; /* Darker, professional background (e.g., deep blue-grey) */
-            box-shadow: 4px 0 15px rgba(0,0,0,0.2); /* Stronger shadow */
+            /* Dark Blue Gradient for a premium feel */
+            background: linear-gradient(180deg, #2c3e50 0%, #1a242f 100%);
+            box-shadow: 4px 0 20px rgba(0,0,0,0.4); /* Deeper shadow */
             width: 280px !important; 
             min-width: 280px !important; 
+            transition: all 0.3s ease-in-out;
         }
         
-        /* Sidebar Header/Title Styling - Light text on dark background */
+        /* Sidebar Header/Title Styling */
         .sidebar-header {
-            padding: 20px 20px 10px 20px;
-            color: #ecf0f1; /* Light grey/almost white for contrast */
-            font-size: 24px;
-            font-weight: bold;
+            padding: 30px 20px 10px 20px;
+            color: #ecf0f1;
+            font-size: 26px; /* Slightly larger */
+            font-weight: 700; /* Bolder */
             text-align: center;
-            border-bottom: 1px solid #34495e; /* Subtle separator */
-            margin-bottom: 15px;
+            /* Use a gradient underline for extra pop */
+            border-bottom: 2px solid;
+            border-image: linear-gradient(to right, #2980b9, #1abc9c) 1;
+            margin-bottom: 25px;
         }
 
-        /* Radio Button (Navigation) Styling */
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 10px; }
+        /* Navigation Links Container */
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 15px; }
 
-        /* Style the labels (the actual menu items) - Light text on dark sidebar */
+        /* Style the labels (the actual menu items) */
         [data-testid="stSidebar"] .stRadio label {
-            color: #ecf0f1; /* Light text */
+            color: #bdc3c7; /* Subtle light gray text */
             padding: 12px 15px;
-            margin-bottom: 5px;
-            border-radius: 6px;
-            transition: all 0.2s;
+            margin-bottom: 8px; /* More spacing */
+            border-radius: 8px; /* Rounder corners */
+            transition: all 0.2s ease-in-out; /* Smooth transition */
             font-weight: 500;
+            font-size: 15px;
         }
         
-        /* Hover state - Highlight background with a primary blue */
+        /* Hover state: Subtle lift and bright color */
         [data-testid="stSidebar"] .stRadio label:hover {
-            background-color: #3498db; /* Primary blue on hover */
-            color: white;
+            background-color: rgba(44, 62, 80, 0.4); /* Lighter dark background */
+            color: #f1c40f; /* Vibrant yellow/gold for hover text */
+            transform: translateX(5px); /* Slide effect */
             cursor: pointer;
         }
 
-        /* Selected/Checked state - Use an inverted highlight */
+        /* Selected/Checked state: Solid active color */
         [data-testid="stSidebar"] .stRadio input:checked + div > span {
-            background-color: #1abc9c !important; /* A contrasting teal/green for selected */
+            /* Vibrant teal background */
+            background-color: #1abc9c !important; 
             color: white !important; 
-            border-radius: 6px;
-            font-weight: bold;
+            border-radius: 8px;
+            font-weight: 700;
             padding: 12px 15px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 10px rgba(26, 188, 156, 0.3); /* Shadow for lift */
         }
+        
+        /* Styling the emoji icons within the labels */
+        [data-testid="stSidebar"] .stRadio label > span:first-child {
+            margin-right: 10px;
+        }
+
 
         /* Logout Button Styling */
         [data-testid="stSidebar"] .stButton button {
             width: 90%;
-            margin: 15px 5%;
-            background-color: #e74c3c; /* A softer red for professional look */
+            margin: 25px 5% 15px 5%; /* More margin at the top */
+            background-color: #e74c3c; 
             color: white;
             border: none;
-            border-radius: 6px;
-            font-weight: bold;
+            border-radius: 8px;
+            font-weight: 600;
+            padding: 10px;
             transition: background-color 0.2s;
         }
         [data-testid="stSidebar"] .stButton button:hover {
             background-color: #c0392b;
+            transform: scale(1.02); /* Slight scale on hover */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -186,7 +199,7 @@ def inject_global_css():
 # --- Login Screen ---
 
 def login_screen():
-    """Displays the login interface and uses the .login-container class to trigger CSS."""
+    """Displays the login interface."""
     st.markdown('<div class="login-container">', unsafe_allow_html=True) 
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -248,6 +261,7 @@ def admin_sidebar():
     current_key = st.session_state.admin_menu_choice
     current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
     
+    # Simple, non-styled navigation header (the main styling comes from the radio buttons)
     st.sidebar.markdown("### **🧭 Navigation**", unsafe_allow_html=True)
     
     choice_with_icon = st.sidebar.radio(
