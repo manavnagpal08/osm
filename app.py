@@ -49,6 +49,7 @@ def load_page(page_file):
 # ---------------------------------------------------------
 # LOGIN SCREEN
 # ---------------------------------------------------------
+
 def login_screen():
     st.markdown("""
     <style>
@@ -60,30 +61,59 @@ def login_screen():
 
     st.markdown("<h1 style='font-size:45px;'>🔐 Login to OMS</h1>", unsafe_allow_html=True)
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    username = st.text_input("Username", key="username_input")
+    password = st.text_input("Password", type="password", key="password_input")
+
+    # 🔥 DEBUG 1 — See what widgets store
+    st.write("DEBUG: raw username =", username)
+    st.write("DEBUG: raw password =", password)
 
     if st.button("Login"):
-        username = username.strip()
-        password = password.strip()
 
-        if not username or not password:
+        # 🔥 DEBUG 2 — Values inside button click
+        st.write("DEBUG: inside button click, username =", username)
+        st.write("DEBUG: inside button click, password =", password)
+
+        username_clean = username.strip()
+        password_clean = password.strip()
+
+        # 🔥 DEBUG 3 — Cleaned values
+        st.write("DEBUG: cleaned username =", username_clean)
+        st.write("DEBUG: cleaned password =", password_clean)
+
+        if not username_clean or not password_clean:
             st.error("Please enter both username and password.")
+            # 🔥 DEBUG 4
+            st.write("DEBUG: empty-check triggered!")
             return
 
-        user = get_user(username)
+        # 🔥 DEBUG 5 — before Firebase
+        st.write("DEBUG: calling get_user() with", username_clean)
+
+        user = get_user(username_clean)
+
+        # 🔥 DEBUG 6 — result from Firebase
+        st.write("DEBUG: user returned =", user)
 
         if not user:
             st.error("User not found.")
+            st.write("DEBUG: USER NOT FOUND")
             return
 
-        if user.get("password") != password:
+        if user.get("password") != password_clean:
             st.error("Incorrect password.")
+            st.write("DEBUG: PASSWORD MISMATCH")
             return
 
-        # SUCCESS LOGIN
-        st.session_state["username"] = username
+        # SUCCESS
+        st.session_state["username"] = username_clean
         st.session_state["role"] = user["role"]
+
+        st.success("Login successful!")
+
+        # 🔥 DEBUG 7 — Show session_state
+        st.write("DEBUG: session_state =", st.session_state)
+
         st.rerun()
 
 
