@@ -234,7 +234,7 @@ tab1, tab2 = st.tabs([
 
 
 # ---------------------------------------------------
-# TAB 1 — PENDING (Enhanced UI)
+# TAB 1 — PENDING (Redesigned UI)
 # ---------------------------------------------------
 with tab1:
 
@@ -325,14 +325,13 @@ with tab1:
                 )
 
                 # --- DIE NUMBERS ---
-                st.caption("Die Numbers")
+                st.subheader("Die & Tooling")
                 col_die_p, col_die_b = st.columns(2)
                 die_paper = col_die_p.text_input(
                     "Paper Die #",
                     value=o.get("diecut_die_paper", ""),
                     placeholder="DIE-P-102",
                     key=f"die_paper_{order_id}",
-                    # label_visibility="visible" (default)
                 )
                 
                 die_board = col_die_b.text_input(
@@ -340,39 +339,38 @@ with tab1:
                     value=o.get("diecut_die_board", ""),
                     placeholder="DIE-B-77",
                     key=f"die_board_{order_id}",
-                    # label_visibility="visible" (default)
                 )
 
-                # --- CUT COUNTS ---
-                st.caption("Cuts per Sheet/Board")
-                cut_per_sheet = st.number_input(
-                    "Paper Cut Per Sheet",
-                    min_value=1,
-                    value=o.get("diecut_cut_per_sheet", 1),
-                    key=f"cut_sheet_{order_id}",
-                    # label_visibility="visible" (default)
-                )
-                
-                cut_per_board = st.number_input(
-                    "Board Cut Per Die",
-                    min_value=1,
-                    value=o.get("diecut_cut_per_board", 1),
-                    key=f"cut_board_{order_id}",
-                    # label_visibility="visible" (default)
-                )
-                
-                # --- CALCULATIONS ---
-                qty = o.get("qty", 1)
-                cut_per_sheet_safe = cut_per_sheet if cut_per_sheet > 0 else 1
-                cut_per_board_safe = cut_per_board if cut_per_board > 0 else 1
-                
-                total_sheets = (qty + cut_per_sheet_safe - 1) // cut_per_sheet_safe
-                total_boards = (qty + cut_per_board_safe - 1) // cut_per_board_safe
+                # --- CUT COUNTS AND CALCULATIONS ---
+                st.subheader("Cut Counts & Requirements")
+                col_cuts, col_reqs = st.columns(2)
 
-                st.markdown("---")
-                st.subheader("Production Requirements")
-                st.metric("📄 Paper Sheets Required", f"{total_sheets:,}")
-                st.metric("🟫 Boards Required", f"{total_boards:,}")
+                with col_cuts:
+                    cut_per_sheet = st.number_input(
+                        "Paper Cut Per Sheet (Impression)",
+                        min_value=1,
+                        value=o.get("diecut_cut_per_sheet", 1),
+                        key=f"cut_sheet_{order_id}",
+                    )
+                    
+                    cut_per_board = st.number_input(
+                        "Board Cut Per Die (Impression)",
+                        min_value=1,
+                        value=o.get("diecut_cut_per_board", 1),
+                        key=f"cut_board_{order_id}",
+                    )
+
+                with col_reqs:
+                    # --- CALCULATIONS ---
+                    qty = o.get("qty", 1)
+                    cut_per_sheet_safe = cut_per_sheet if cut_per_sheet > 0 else 1
+                    cut_per_board_safe = cut_per_board if cut_per_board > 0 else 1
+                    
+                    total_sheets = (qty + cut_per_sheet_safe - 1) // cut_per_sheet_safe
+                    total_boards = (qty + cut_per_board_safe - 1) // cut_per_board_safe
+                    
+                    st.metric("📄 Paper Sheets Required", f"{total_sheets:,}")
+                    st.metric("🟫 Boards Required", f"{total_boards:,}")
 
                 if st.button("💾 Save Details", key=f"save_dc_{order_id}", use_container_width=True):
                     update(f"orders/{key}", {
@@ -421,7 +419,7 @@ with tab1:
                 # --- NOTES ---
                 st.subheader("📝 Notes")
                 notes = st.text_area(
-                    "Die-Cut Notes/Instructions for Assembly",
+                    "Notes/Instructions for Assembly",
                     value=o.get("diecut_notes", ""),
                     height=100,
                     key=f"notes_{order_id}",
@@ -469,7 +467,7 @@ with tab1:
 
 
 # ---------------------------------------------------
-# TAB 2 — COMPLETED JOBS (Enhanced UI)
+# TAB 2 — COMPLETED JOBS (Redesigned UI)
 # ---------------------------------------------------
 with tab2:
 
@@ -506,14 +504,20 @@ with tab2:
 
             with col_data:
                 st.markdown("#### Production Details")
-                st.json({
-                    "Paper Die #": o.get("diecut_die_paper", "N/A"),
-                    "Board Die #": o.get("diecut_die_board", "N/A"),
-                    "Paper Sheets Used": f"{o.get('diecut_total_sheets', 0):,}",
-                    "Boards Used": f"{o.get('diecut_total_boards', 0):,}",
-                    "Blade Type": o.get("diecut_blade", "N/A"),
-                })
                 
+                # Die Numbers
+                st.markdown("##### Tooling")
+                die_cols = st.columns(2)
+                die_cols[0].markdown(f"**Paper Die #:** `{o.get('diecut_die_paper', 'N/A')}`")
+                die_cols[1].markdown(f"**Board Die #:** `{o.get('diecut_die_board', 'N/A')}`")
+
+                # Counts
+                st.markdown("##### Material Usage")
+                count_cols = st.columns(2)
+                count_cols[0].markdown(f"**Paper Sheets Used:** `{o.get('diecut_total_sheets', 0):,}`")
+                count_cols[1].markdown(f"**Boards Used:** `{o.get('diecut_total_boards', 0):,}`")
+                st.markdown(f"**Blade Type:** `{o.get('diecut_blade', 'N/A')}`")
+
                 st.markdown("#### Notes")
                 st.info(o.get("diecut_notes", "No notes recorded."))
             
