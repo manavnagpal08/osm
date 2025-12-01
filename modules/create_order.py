@@ -1,7 +1,7 @@
 import streamlit as st
 from firebase import read, push
 from utils import generate_order_id
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 import qrcode
 import base64
 import io
@@ -12,7 +12,6 @@ import urllib.parse
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import tempfile
-from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------
 # CONFIG
@@ -28,6 +27,7 @@ GMAIL_PASS = "your_app_password"
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
 
+
 # ---------------------------------------------------
 # QR GENERATOR
 # ---------------------------------------------------
@@ -40,6 +40,7 @@ def generate_qr_base64(order_id: str):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
+
 
 # ---------------------------------------------------
 # WHATSAPP
@@ -56,6 +57,7 @@ def get_whatsapp_link(phone, order_id, customer):
     )
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
+
 
 # ---------------------------------------------------
 # EMAIL
@@ -76,8 +78,9 @@ def send_gmail(to, subject, html):
         st.error(f"Email Error: {e}")
         return False
 
+
 # ---------------------------------------------------
-# PDF GENERATOR
+# PDF GENERATOR  (UNCHANGED)
 # ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
     logo_path = "srplogo.png"
@@ -111,7 +114,7 @@ def generate_order_pdf(data, qr_b64):
     c.setLineWidth(1.4)
     c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
 
-    # Company Title
+    # Company Name + Tagline
     left_block_x = separator_x + 20
     top_y = height - 60
 
@@ -122,7 +125,7 @@ def generate_order_pdf(data, qr_b64):
     c.setFont("Helvetica", 14)
     c.drawString(left_block_x, top_y - 25, "Premium Packaging & Printing Solutions")
 
-    # Contact info
+    # Contact info under tagline
     info_y = top_y - 55
     c.setFont("Helvetica", 12)
     for line in [
@@ -133,8 +136,9 @@ def generate_order_pdf(data, qr_b64):
         c.drawString(left_block_x, info_y, line)
         info_y -= 18
 
-    # Divider
+    # Header Divider
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
+    c.setLineWidth(3)
     c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
 
     c.setFillColorRGB(0, 0, 0)
@@ -191,8 +195,9 @@ def generate_order_pdf(data, qr_b64):
             c.showPage()
             y = height - 80
 
-    # QR Code
     y -= 15
+
+    # QR Code
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
@@ -214,8 +219,9 @@ def generate_order_pdf(data, qr_b64):
     c.save()
     return temp_file.name
 
+
 # ---------------------------------------------------
-# UI
+# UI STARTS
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
 
@@ -223,6 +229,7 @@ all_orders = read("orders") or {}
 customer_list = sorted(list(set(
     o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
 )))
+
 
 # ---------------------------------------------------
 # STEP 1 — CUSTOMER BLOCK
@@ -258,7 +265,6 @@ with box:
 
             if selected != "Select":
                 customer_input = selected.strip()
-
                 cust_orders = [
                     o for o in all_orders.values()
                     if o.get("customer") == customer_input
@@ -276,6 +282,7 @@ with box:
 
             customer_phone_input = st.text_input("Phone", customer_phone_input)
             customer_email_input = st.text_input("Email", customer_email_input)
+
 
 # ---------------------------------------------------
 # STEP 2 — REPEAT ORDER AUTOFILL
@@ -301,6 +308,7 @@ if order_type_simple == "Repeat" and customer_input:
                     st.success("Auto-fill applied!")
                     break
 
+
 # ---------------------------------------------------
 # STEP 3 — MAIN FORM
 # ---------------------------------------------------
@@ -313,6 +321,23 @@ with st.form("order_form"):
     st.text_input("Order ID", order_id, disabled=True)
 
     prev = previous_order or {}
+
+    # ---------------------- DATE INPUTS (IST FIXED) ----------------------
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        receive_date = st.date_input("📥 Received Date (IST)", value=date.today())
+
+    with colB:
+        due_date = st.date_input("📤 Due Date (IST)", value=date.today())
+
+    now_ist = datetime.now(IST).time()
+
+    receive_dt = datetime.combine(receive_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
+    due_dt = datetime.combine(due_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
+    # --------------------------------------------------------------------
 
     col1, col2, col3 = st.columns(3)
 
@@ -333,14 +358,6 @@ with st.form("order_form"):
 
     item = st.text_area("Product Description", value=prev.get("item", ""))
 
-    # ---------------------------------------------------
-    # ⭐ FIXED: STORE IN IST FORMAT
-    # ---------------------------------------------------
-    IST = timezone(timedelta(hours=5, minutes=30))
-    receive_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
-    due_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
-    # ---------------------------------------------------
-
     advance = st.radio("Advance Received?", ["Yes", "No"])
 
     board = st.text_input("Board Thickness ID", value=prev.get("board_thickness_id", ""))
@@ -357,19 +374,15 @@ with st.form("order_form"):
 
     if submitted:
 
-        customer = customer_input.strip()
-        customer_phone = customer_phone_input.strip()
-        customer_email = customer_email_input.strip()
-
-        if not customer:
+        if not customer_input.strip():
             st.error("⚠️ Customer Name is required.")
             st.stop()
 
-        if not customer_phone:
+        if not customer_phone_input.strip():
             st.error("⚠️ Customer Phone Number is required.")
             st.stop()
 
-        if len("".join(filter(str.isdigit, customer_phone))) < 10:
+        if len("".join(filter(str.isdigit, customer_phone_input))) < 10:
             st.error("⚠️ Enter a valid phone number.")
             st.stop()
 
@@ -377,22 +390,16 @@ with st.form("order_form"):
 
         data = {
             "order_id": order_id,
-            "customer": customer,
-            "customer_phone": customer_phone,
-            "customer_email": customer_email,
+            "customer": customer_input,
+            "customer_phone": customer_phone_input,
+            "customer_email": customer_email_input,
             "type": order_type_simple,
             "product_type": product_type,
             "priority": priority,
             "item": item,
             "qty": qty,
-
-            # ---------------------------------------------------
-            # ⭐ FIXED: TRUE IST TIMESTAMPS STORED HERE
-            # ---------------------------------------------------
-            "received": receive_date,
-            "due": due_date,
-            # ---------------------------------------------------
-
+            "received": receive_dt,   # FIXED IST
+            "due": due_dt,            # FIXED IST
             "advance": advance,
             "foil_id": foil,
             "spotuv_id": spotuv,
@@ -406,29 +413,29 @@ with st.form("order_form"):
 
         push("orders", data)
 
-        qr_b64 = generate_qr_base64(order_id)
         pdf_path = generate_order_pdf(data, qr_b64)
-
         with open(pdf_path, "rb") as f:
             st.session_state["last_order_pdf"] = f.read()
 
         st.session_state["last_qr"] = qr_b64
         st.session_state["last_order_id"] = order_id
-        st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone, order_id, customer)
+        st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone_input, order_id, customer_input)
         st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
         st.session_state["order_created_flag"] = True
 
-        if customer_email:
+        # Send Email if needed
+        if customer_email_input:
             html_email = f"""
             <h2>Your Order {order_id} is Created</h2>
-            <p>Hello {customer},</p>
+            <p>Hello {customer_input},</p>
             <p>Your order has been successfully created.</p>
             <p><b>Track your order here:</b></p>
             <p><a href="{st.session_state['last_tracking']}">{st.session_state['last_tracking']}</a></p>
             """
-            send_gmail(customer_email, f"Order {order_id} Created", html_email)
+            send_gmail(customer_email_input, f"Order {order_id} Created", html_email)
 
         st.rerun()
+
 
 # ---------------------------------------------------
 # SUCCESS BLOCK
@@ -442,7 +449,6 @@ if st.session_state.get("order_created_flag"):
         data=st.session_state["last_order_pdf"],
         file_name=f"{st.session_state['last_order_id']}_order.pdf",
         mime="application/pdf",
-        type="primary",
         use_container_width=True
     )
 
