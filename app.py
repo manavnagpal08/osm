@@ -6,26 +6,28 @@ import json
 # FIREBASE MODULE ACCESS & INITIALIZATION
 # ----------------------------------------
 
-# We no longer rely on 'from firebase import ...' because it's failing.
-# Instead, we retrieve the functions directly from the global scope, 
-# where the environment is expected to place them after initialization.
+# Since standard imports and locals().get() are failing, we explicitly use 
+# st.globals.get() to access functions injected by the environment.
 
 try:
-    initializeApp = locals().get('initializeApp')
-    getFirestore = locals().get('getFirestore')
-    collection = locals().get('collection')
-    doc = locals().get('doc')
-    getDoc = locals().get('getDoc')
-    getAuth = locals().get('getAuth')
-    signInWithCustomToken = locals().get('signInWithCustomToken')
-    signInAnonymously = locals().get('signInAnonymously')
+    initializeApp = st.globals.get('initializeApp')
+    getFirestore = st.globals.get('getFirestore')
+    collection = st.globals.get('collection')
+    doc = st.globals.get('doc')
+    getDoc = st.globals.get('getDoc')
+    getAuth = st.globals.get('getAuth')
+    signInWithCustomToken = st.globals.get('signInWithCustomToken')
+    signInAnonymously = st.globals.get('signInAnonymously')
     
     # Check if critical functions are present
     if not (initializeApp and getFirestore and getAuth):
-        raise Exception("Required Firebase functions were not found in the global scope.")
-
+        # Fallback to a standard import if st.globals failed, just in case
+        from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth, signInWithCustomToken, signInAnonymously
+        # If the import succeeds, we can proceed.
+    
 except Exception as e:
-    st.error(f"FATAL ERROR: Essential Firebase SDK functions are unavailable: {e}")
+    # This catches both the ImportError fallback and the initial check if functions are None
+    st.error(f"FATAL ERROR: Essential Firebase SDK functions are unavailable (Attempted all access methods): {e}")
     st.stop()
 
 
