@@ -1,337 +1,359 @@
 import streamlit as st
-from firebase import read, update
-import base64
-from datetime import datetime, timedelta, timezone
+import os
+from firebase import read
 
+# --- Streamlit Page Configuration ---
+st.set_page_config(
+    page_title="OMS System", 
+    layout="wide", 
+    initial_sidebar_state="collapsed" 
+)
 
-st.set_page_config(page_title="Logistics Department", page_icon="🚚", layout="wide")
+# --- Constants ---
+DEFAULT_ADMIN = {
+    "username": "admin",
+    "password": "admin123",
+    "role": "admin"
+}
 
-# ---------------- ROLE CHECK ----------------
-if "role" not in st.session_state:
-    st.session_state["role"] = "admin"
-    st.session_state["username"] = "AdminUser"
+# ⭐ FIX: Corrected the routing for the 'design' department 
+# 🚀 ADD: Added the 'lamination' department
+DEPARTMENT_PAGE_MAP = {
+    "design": "design.py",
+    "printing": "printing.py",
+    "lamination": "lamination.py", # NEW DEPARTMENT
+    "diecut": "diecut.py",
+    "assembly": "assembly.py",
+    "packaging": "packaging.py",
+}
 
-if st.session_state["role"] not in ["admin", "dispatch", "packaging"]:
-    st.error("❌ You do not have permission to access this page.")
-    st.stop()
+# --- Utility Functions ---
 
-USER = st.session_state["username"]
-
-
-# ---------------- LOAD ORDERS ----------------
-@st.cache_data(ttl=1)
-def load_orders():
+def get_user(username):
+    """Retrieves user data from Firebase or returns the default admin."""
     try:
-        orders = read("orders") or {}
-    except:
-        orders = {}
+        fb_user = read(f"users/{username}") 
+        if isinstance(fb_user, dict) and "password" in fb_user and "role" in fb_user:
+            return fb_user
+    except Exception:
+        pass 
+    if username == DEFAULT_ADMIN["username"]:
+        return DEFAULT_ADMIN
+    return None
 
-    incoming = {}      # stage = Assembly (completed & ready)
-    storage = {}       # stage = Storage
-    dispatch = {}      # stage = Dispatch
-    completed = {}     # stage = Completed
-
-    for key, o in orders.items():
-        if not isinstance(o, dict):
-            continue
-
-        s = o.get("stage", "")
-
-        if s == "Assembly":      # from assembly page
-            incoming[key] = o
-
-        elif s == "Storage":
-            storage[key] = o
-
-        elif s == "Dispatch":
-            dispatch[key] = o
-
-        elif s == "Completed":
-            completed[key] = o
-
-    return incoming, storage, dispatch, completed
-
-
-incoming, storage, dispatch, completed = load_orders()
-
-
-# ---------------- UTILS ----------------
-def parse_dt(s):
-    if not s:
-        return None
-    try:
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except:
-        return None
-
-
-def dl_qr_ui(b64):
-    if not b64:
+def load_page(page_file):
+    """Dynamically loads and executes a page module from the 'modules' directory."""
+    if ".." in page_file or not page_file.endswith(".py"):
+        st.error("Invalid page file request.")
         return
-    raw = base64.b64decode(b64 + "===")
-    st.download_button("⬇ Download QR", raw, "order_qr.png", "image/png", use_container_width=True)
+
+    full_path = os.path.join("modules", page_file)
+    
+    if os.path.exists(full_path):
+        try:
+            with open(full_path, "r") as f:
+                code = compile(f.read(), full_path, "exec")
+                exec(code, globals())
+        except Exception as e:
+            st.error(f"Error loading page **{page_file}**: {e}")
+    else:
+        st.error(f"Page module not found: **{page_file}** (Expected in the 'modules/' folder)")
+
+def logout():
+    """Clears session state and reruns to show the login screen."""
+    for key in list(st.session_state.keys()):
+        if key not in ["theme"]: 
+            del st.session_state[key]
+    st.rerun()
+
+# --- Custom CSS Injection ---
+
+def inject_global_css():
+    """Injects all global and local styles, optimized for the standard size and ultimate beautiful sidebar."""
+    
+    st.markdown("""
+    <style>
+        /* Global App Styling */
+        .stApp {
+            /* Main content area is pure white */
+            background-color: #FFFFFF; 
+            font-family: 'Poppins', sans-serif;
+        }
+
+        /* ------------------------------------------------------------- */
+        /* LOGIN SCREEN STYLING (Hidden sidebar, custom background) */
+        /* ------------------------------------------------------------- */
+        .stApp:has(.login-container) {
+            background-image: url('https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh9JgbXkHFD_68MIoMrl8sOeanj-iPFaeHPB8IaMYuwcAsNAstm3ZYY9i33sPe4BKe-iwexUYISoCen0ZBSO8VV_JZG1R9Wszjv3yEyAL1BBZBn4xTarqdVloKEq9BLR6PNaBp47ao4ZdopDD3oVN1A0GIkNL0ijwB7R1eLKAYGv8LKht52gryczc57bUtS/s320/greb.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-color: transparent;
+        }
+        
+        .stApp:has(.login-container) [data-testid="stHeader"], 
+        .stApp:has(.login-container) [data-testid="stToolbar"], 
+        .stApp:has(.login-container) [data-testid="stSidebar"] {
+            display: none !important;
+        }
+
+        /* Login Card Styles */
+        .login-container {
+            backdrop-filter: blur(12px);
+            background: rgba(255,255,255,0.18);
+            padding: 40px;
+            border-radius: 16px;
+            width: 380px;
+            margin: auto; /* Removed fixed margin-top */
+            margin-top: 140px; /* Re-added margin-top for vertical position */
+            box-shadow: 0 4px 40px rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,255,255,0.3);
+            text-align: left;
+        }
+        
+        .login-title {
+            color: #1f2833;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        /* ------------------------------------------------------------- */
+        /* ADMIN SIDEBAR STYLING (Standard Size & Ultimate Aesthetics) */
+        /* ------------------------------------------------------------- */
+        
+        /* Sidebar Container: Proper size (250px) and dark gradient */
+        .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
+            box-shadow: 4px 0 25px rgba(0,0,0,0.7);
+            /* Standard Sidebar Size */
+            width: 250px !important; 
+            min-width: 250px !important; 
+            transition: all 0.3s ease-in-out;
+        }
+        
+        /* Sidebar Header/Title Styling */
+        .sidebar-header {
+            padding: 25px 15px 10px 15px; /* Reduced padding for size */
+            color: #f6f9fc;
+            font-size: 24px; /* Reduced size for 250px width */
+            font-weight: 800;
+            text-align: center;
+            /* Gradient Underline */
+            border-bottom: 2px solid;
+            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
+            margin-bottom: 25px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        }
+
+        /* Navigation Links Container */
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } /* Reduced horizontal padding */
+        
+        /* FIX: Ensure all text elements are white/light for contrast, and add text shadow */
+        [data-testid="stSidebar"] .stRadio label * {
+            color: #f6f9fc !important;
+            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); /* Subtle text shadow */
+        }
+
+        /* Style the labels (the actual menu items) - Frosted Glass Look */
+        [data-testid="stSidebar"] .stRadio label {
+            padding: 12px 15px; /* Adjusted padding */
+            margin-bottom: 6px; 
+            border-radius: 8px; /* Slightly smaller radius for 250px width */
+            
+            /* Frosted Look */
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            
+            transition: all 0.2s ease-in-out; 
+            font-weight: 500;
+            font-size: 15px; 
+        }
+        
+        /* Hover state: Stronger glow and color change */
+        [data-testid="stSidebar"] .stRadio label:hover {
+            background-color: rgba(0, 191, 255, 0.2);
+            color: #00BFFF !important;
+            transform: translateX(2px) scale(1.01); 
+            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.3);
+            cursor: pointer;
+        }
+        
+        /* FIX for hover text color (must target the inner span) */
+        [data-testid="stSidebar"] .stRadio label:hover * {
+            color: #00BFFF !important; 
+        }
+
+        /* Selected/Checked state: Solid Electric Blue Highlight */
+        [data-testid="stSidebar"] .stRadio input:checked + div > span {
+            background-color: #00BFFF !important; /* Electric Blue */
+            color: white !important; 
+            border-radius: 8px;
+            font-weight: 700;
+            padding: 12px 15px;
+            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.5);
+        }
+
+        /* Logout Button Styling: Prominent and separated */
+        [data-testid="stSidebar"] .stButton button {
+            width: 90%;
+            margin: 30px 5% 20px 5%;
+            background-color: #1E90FF;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            padding: 12px;
+            transition: all 0.2s;
+        }
+        [data-testid="stSidebar"] .stButton button:hover {
+            background-color: #00BFFF;
+            transform: scale(1.02);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- Login Screen ---
+
+def login_screen():
+    """Displays the login interface."""
+    
+    # ⭐ FIX: Center columns FIRST
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        # START container INSIDE col2 (important!)
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">🔐 OMS Login</div>', unsafe_allow_html=True)
+
+        # Form prevents rerun glitches, clear_on_submit=False is the default but added for clarity
+        with st.form("login_form", clear_on_submit=False):
+
+            username = st.text_input("Username", key="login_username_input", autocomplete="username")
+            password = st.text_input("Password", type="password", key="login_password_input", autocomplete="current-password")
+
+            submitted = st.form_submit_button("Login")
+
+            if submitted:
+                username_clean = username.strip()
+                password_clean = password.strip()
+
+                if not username_clean or not password_clean:
+                    st.error("Please enter both username and password.")
+                    return # Exit the submitted block
+
+                user = get_user(username_clean)
+
+                if not user:
+                    st.error("User not found.")
+                    return
+
+                if user.get("password") != password_clean:
+                    st.error("Incorrect password.")
+                    return
+
+                st.session_state.username = username_clean
+                st.session_state.role = user["role"]
+
+                st.success("Login successful! Redirecting...")
+                st.rerun() # Trigger the main_app() function
+
+        # END container
+        st.markdown("</div>", unsafe_allow_html=True) 
+
+# --- Admin Sidebar & Routing ---
+
+def admin_sidebar():
+    """Displays the ultimate beautifully styled navigation sidebar for 'admin' users."""
+    
+    st.sidebar.markdown('<div class="sidebar-header">📦 OMS Admin</div>', unsafe_allow_html=True)
+
+    ADMIN_MENU = {
+        "Create Order": ("📦", "create_order.py"),
+        "Design Dept": ("🎨", "design.py"),
+        "Printing Dept": ("🖨️", "printing.py"),
+        "Lamination Dept": ("🛡️", "lamination.py"), # NEW ENTRY
+        "Die-Cut Dept": ("✂️", "diecut.py"),
+        "Assembly Dept": ("🔧", "assembly.py"),
+        "Packaging Dept": ("📦✨", "packaging.py"),
+        "All Orders": ("📋", "all_orders.py"),
+        "User Management": ("🧑‍💼", "manage_users.py"),
+    }
+
+    if "admin_menu_choice" not in st.session_state:
+        st.session_state.admin_menu_choice = "Create Order"
+
+    display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
+    
+    current_key = st.session_state.admin_menu_choice
+    current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
+    
+    st.sidebar.markdown('<h3 style="color: #f6f9fc; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
+    
+    choice_with_icon = st.sidebar.radio(
+        "", 
+        display_options,
+        index=current_index,
+        key="admin_radio_menu" 
+    )
+
+    choice = " ".join(choice_with_icon.split(" ")[1:])
+
+    if choice != st.session_state.admin_menu_choice:
+         st.session_state.admin_menu_choice = choice
+         st.rerun() 
+
+    _, file = ADMIN_MENU[st.session_state.admin_menu_choice]
+    load_page(file)
+    
+    st.sidebar.markdown("---")
+    st.sidebar.button("Logout", on_click=logout) 
 
 
-# ---------------- TABS ----------------
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📥 Incoming From Assembly",
-    "🏬 Storage",
-    "🚀 Dispatch Queue",
-    "✅ Completed Orders"
-])
+# --- Departmental Routing ---
 
-# ============================================================
-# TAB 1 → INCOMING
-# ============================================================
-with tab1:
+def department_router():
+    """Routes a non-admin user directly to their assigned department page."""
+    
+    role = st.session_state.get("role")
+    
+    with st.container(border=True):
+        st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
+        st.markdown("Please manage your assigned orders below.")
+        st.button("Logout", on_click=logout) 
 
-    st.subheader(f"Incoming Orders From Assembly ({len(incoming)})")
+    file = DEPARTMENT_PAGE_MAP.get(role)
 
-    if len(incoming) == 0:
-        st.success("🎉 No incoming assembly orders.")
-  
+    if file:
+        load_page(file)
+    else:
+        st.error(f"Your role **{role}** is not assigned to a department page.")
 
-    # ---- MULTI SELECT ----
-    selected = []
-    colA, colB = st.columns([0.2, 0.8])
+# --- Application Entry Point ---
 
-    with colA:
-        select_all = st.checkbox("Select All")
-
-    with colB:
-        bulk_action = st.selectbox(
-            "Apply Action:",
-            ["None", "Move Selected to Storage", "Move Selected to Dispatch"]
-        )
-
-    if select_all:
-        selected = list(incoming.keys())
-
-    # ---- BULK ACTION ----
-    if bulk_action != "None" and selected:
-        now = datetime.now(timezone.utc).isoformat()
-
-        if bulk_action == "Move Selected to Storage":
-            for k in selected:
-                update(f"orders/{k}", {
-                    "stage": "Storage",
-                    "storage_started_at": now
-                })
-            st.success(f"{len(selected)} orders moved to Storage.")
-            st.rerun()
-
-        if bulk_action == "Move Selected to Dispatch":
-            for k in selected:
-                update(f"orders/{k}", {
-                    "stage": "Dispatch",
-                    "storage_completed_at": now
-                })
-            st.success(f"{len(selected)} orders moved to Dispatch.")
-            st.rerun()
-
+def main_app():
+    """Main function to handle post-login routing."""
+    
+    st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
+    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
     st.markdown("---")
 
-    # ---- LIST ORDERS ----
-    for key, o in incoming.items():
+    # Routing based on role
+    if st.session_state["role"] == "admin":
+        admin_sidebar()
+    elif st.session_state["role"] in DEPARTMENT_PAGE_MAP:
+        department_router()
+    else:
+        st.error(f"Your role **{st.session_state['role']}** is not authorized to view any page. Please contact administration.")
+        st.button("Logout", on_click=logout) 
 
-        order_id = o.get("order_id")
-        item = o.get("item")
-        customer = o.get("customer")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-        assembly_time = parse_dt(o.get("assembly_completed_at"))
+# --- Main Execution Flow ---
 
-        with st.container(border=True):
+# Inject CSS styles first
+inject_global_css()
 
-            cols = st.columns([0.1, 3, 1, 1, 2, 2])
-
-            # Select checkbox
-            with cols[0]:
-                chk = st.checkbox("", key=f"sel_{key}")
-                if chk:
-                    selected.append(key)
-
-            cols[1].markdown(f"### {order_id} — {item}")
-            cols[1].caption(f"Customer: {customer}")
-
-            cols[2].metric("Qty", qty)
-            cols[3].metric("Priority", priority)
-
-            # Time since assembly
-            with cols[4]:
-                if assembly_time:
-                    diff = datetime.now(timezone.utc) - assembly_time
-                    st.info(f"{str(diff).split('.')[0]}")
-                else:
-                    st.warning("N/A")
-
-            # QR
-            with cols[5]:
-                qr = o.get("order_qr")
-                if qr:
-                    st.image(base64.b64decode(qr), width=90)
-
-            # --- ACTION BUTTONS ---
-            b1, b2 = st.columns(2)
-
-            if b1.button("🏬 Move to Storage", key=f"to_store_{key}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "stage": "Storage",
-                    "storage_started_at": datetime.now(timezone.utc).isoformat()
-                })
-                st.rerun()
-
-            if b2.button("🚀 Move to Dispatch", key=f"to_disp_{key}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "stage": "Dispatch",
-                    "storage_completed_at": datetime.now(timezone.utc).isoformat()
-                })
-                st.rerun()
-
-        st.markdown("---")
-
-
-# ============================================================
-# TAB 2 → STORAGE
-# ============================================================
-with tab2:
-
-    st.subheader(f"Orders in Storage ({len(storage)})")
-
-    if len(storage) == 0:
-        st.info("No orders in storage.")
-
-
-    for key, o in storage.items():
-
-        order_id = o.get("order_id")
-        item = o.get("item")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-
-        started_raw = o.get("storage_started_at")
-        started = parse_dt(started_raw) if started_raw else None
-
-        time_in_storage = "N/A"
-        if started:
-            time_in_storage = str(datetime.now(timezone.utc) - started).split(".")[0]
-
-        with st.container(border=True):
-
-            cols = st.columns([3, 1, 1, 2, 1])
-
-            cols[0].markdown(f"### {order_id} — {item}")
-            cols[1].metric("Qty", qty)
-            cols[2].metric("Priority", priority)
-            cols[3].metric("Time in Storage", time_in_storage)
-
-            with cols[4]:
-                if st.button("🚀 Move to Dispatch", key=f"s2d_{key}", use_container_width=True):
-                    update(f"orders/{key}", {
-                        "stage": "Dispatch",
-                        "storage_completed_at": datetime.now(timezone.utc).isoformat()
-                    })
-                    st.rerun()
-
-        st.markdown("---")
-
-
-# ============================================================
-# TAB 3 → DISPATCH
-# ============================================================
-with tab3:
-
-    st.subheader(f"Pending Dispatch ({len(dispatch)})")
-
-    if len(dispatch) == 0:
-        st.info("No orders waiting for dispatch.")
- 
-
-    for key, o in dispatch.items():
-
-        order_id = o.get("order_id")
-        item = o.get("item")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-        qr = o.get("order_qr")
-
-        with st.container(border=True):
-
-            cols = st.columns([3, 1, 1, 2])
-
-            cols[0].markdown(f"### {order_id} — {item}")
-            cols[1].metric("Qty", qty)
-            cols[2].metric("Priority", priority)
-
-            with cols[3]:
-                if qr:
-                    st.image(base64.b64decode(qr), width=80)
-
-            st.markdown("#### Dispatch Details")
-
-            courier = st.text_input("Courier", o.get("courier", ""), key=f"courier_{key}")
-            tracking = st.text_input("Tracking No.", o.get("tracking_number", ""), key=f"track_{key}")
-            notes = st.text_area("Notes", o.get("dispatch_notes", ""), key=f"notes_{key}")
-
-            c1, c2 = st.columns(2)
-
-            if c1.button("💾 Save", key=f"save_{key}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "courier": courier,
-                    "tracking_number": tracking,
-                    "dispatch_notes": notes
-                })
-                st.success("Saved")
-                st.rerun()
-
-            if c2.button("🎉 Mark Completed", key=f"done_{key}", use_container_width=True):
-                now = datetime.now(timezone.utc).isoformat()
-                update(f"orders/{key}", {
-                    "stage": "Completed",
-                    "completed_at": now,
-                    "dispatch_completed_at": now,
-                    "dispatch_completed_by": USER
-                })
-                st.balloons()
-                st.rerun()
-
-        st.markdown("---")
-
-
-# ============================================================
-# TAB 4 → COMPLETED
-# ============================================================
-with tab4:
-
-    st.subheader(f"Completed Orders ({len(completed)})")
-
-    if len(completed) == 0:
-        st.info("No completed orders yet.")
-
-
-    for key, o in completed.items():
-
-        order_id = o.get("order_id")
-        item = o.get("item")
-        courier = o.get("courier", "N/A")
-        tracking = o.get("tracking_number", "N/A")
-        notes = o.get("dispatch_notes", "N/A")
-        qr = o.get("order_qr")
-
-        completed_dt = parse_dt(o.get("completed_at"))
-        completed_txt = completed_dt.strftime("%Y-%m-%d %H:%M") if completed_dt else "N/A"
-
-        with st.expander(f"✅ {order_id} — {item}"):
-            st.markdown(f"**Courier:** {courier}")
-            st.markdown(f"**Tracking:** {tracking}")
-            st.markdown(f"**Completed At:** {completed_txt}")
-            st.markdown(f"**Notes:** {notes}")
-
-            if qr:
-                st.image(base64.b64decode(qr), width=120)
-                dl_qr_ui(qr)
-
-        st.markdown("---")
+if "role" not in st.session_state:
+    login_screen()
+else:
+    main_app()
