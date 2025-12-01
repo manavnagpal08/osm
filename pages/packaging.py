@@ -373,37 +373,43 @@ with tab1:
                     st.rerun()
 
                 st.divider()
-
-                # -------- MOVE TO DISPATCH (READINESS CHECK) --------
+                
+                # -------- MARK ORDER AS COMPLETED (FINAL STAGE) --------
                 is_time_ended = bool(end)
                 is_file_uploaded = bool(packing_file)
 
                 is_ready = is_time_ended and is_file_uploaded
 
                 if is_ready:
-                    if st.button("🚚 Move to Dispatch", key=f"move_{order_id}", type="primary", use_container_width=True):
+                    if st.button("🎉 Mark Order Completed", key=f"complete_{order_id}", type="primary", use_container_width=True):
+                        now = datetime.now().isoformat()
+
                         update(f"orders/{key}", {
-                            "stage": "Dispatch",
-                            "packing_completed_at": datetime.now().isoformat()
+                            "stage": "Completed",
+                            "completed_at": now,
+                            "packing_completed_at": now
                         })
+
+                        st.success("✅ Order marked as COMPLETED and delivered to customer!")
                         st.balloons()
                         st.rerun()
+
                 else:
-                    st.error("⚠ **JOB NOT READY TO MOVE**")
-                    
+                    st.error("⚠ **ORDER NOT READY TO MARK AS COMPLETED**")
+
                     missing_items = []
                     if not is_time_ended:
                         missing_items.append("⏹ End Packing Time")
                     if not is_file_uploaded:
-                        missing_items.append("📁 Final Output/Proof File Uploaded")
+                        missing_items.append("📁 Upload Final Output/Proof File")
 
                     if missing_items:
-                        st.markdown(f"""
-                        **Please complete the following missing steps:**
-                        - {'<br>- '.join(missing_items)}
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.warning("Ensure all required steps are finished.")
+                        st.markdown(
+                            "**Please complete the following requirements:**<br>- " +
+                            "<br>- ".join(missing_items),
+                            unsafe_allow_html=True
+                        )
+
 
 # ---------------- TAB 2: COMPLETED ----------------
 with tab2:
