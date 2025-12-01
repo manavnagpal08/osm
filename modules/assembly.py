@@ -1,7 +1,7 @@
 import streamlit as st
 from firebase import read, update
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Imported timezone
 from typing import Optional, Any, Dict
 
 # -----------------------------------------
@@ -51,6 +51,13 @@ def calculate_time_diff(start: Optional[str], end: Optional[str]) -> str:
         try:
             t1 = datetime.fromisoformat(start)
             t2 = datetime.fromisoformat(end)
+            
+            # Ensure naive datetimes (from old data) are treated as UTC for correct subtraction
+            if t1.tzinfo is None or t1.tzinfo.utcoffset(t1) is None:
+                t1 = t1.replace(tzinfo=timezone.utc)
+            if t2.tzinfo is None or t2.tzinfo.utcoffset(t2) is None:
+                t2 = t2.replace(tzinfo=timezone.utc)
+                
             diff = t2 - t1
             # Format time difference to exclude microseconds
             return f"Total Time: **{str(diff).split('.')[0]}**"
@@ -122,8 +129,9 @@ def download_button_ui(label: str, b64: Optional[str], order_id: str, fname: str
 # -----------------------------------------
 def generate_slip(order, assembled_qty, assign_to, material, notes):
     
-    # Use UTC for standard ISO formatting if needed, but for the slip, local time is fine
-    now = datetime.now() 
+    # Save current time in IST for the slip generation
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(IST) 
 
     lines = [
         "ASSEMBLY DEPARTMENT – WORK SLIP",
@@ -142,7 +150,7 @@ def generate_slip(order, assembled_qty, assign_to, material, notes):
         "Notes:",
         notes or "No special notes.",
         "",
-        f"Generated: {now.strftime('%Y-%m-%d %H:%M')}"
+        f"Generated: {now.strftime('%Y-%m-%d %H:%M %Z')}"
     ]
 
     def esc(t): return t.replace("(", "\\(").replace(")", "\\)")
@@ -236,9 +244,14 @@ with tab1:
             if start_design_out:
                 try:
                     start_time = datetime.fromisoformat(start_design_out)
+                    
+                    # Ensure start_time is UTC aware for consistent calculation
+                    if start_time.tzinfo is None or start_time.tzinfo.utcoffset(start_time) is None:
+                        start_time = start_time.replace(tzinfo=timezone.utc)
+
                     # Assembly is given 36 hours from the completion of the previous step
                     deadline = start_time + timedelta(hours=36)
-                    now = datetime.now()
+                    now = datetime.now(timezone.utc) # Compare against current UTC time
                     
                     if now > deadline:
                         remaining = now - deadline
@@ -275,15 +288,37 @@ with tab1:
                     
                     if not start:
                         if st.button("▶️ Start Assembly", key=f"start_{order_id}", use_container_width=True, type="secondary"):
-                            update(f"orders/{key}", {"assembly_start": datetime.now().isoformat()})
+                            # Save time as UTC with explicit timezone info
+                            update(f"orders/{key}", {"assembly_start": datetime.now(timezone.utc).isoformat()})
                             st.rerun()
                         st.caption("Awaiting start signal.")
                     elif not end:
                         if st.button("⏹ End Assembly", key=f"end_{order_id}", use_container_width=True, type="primary"):
-                            update(f"orders/{key}", {"assembly_end": datetime.now().isoformat()})
+                            # Save end time as UTC
+                            update(f"orders/{key}", {"assembly_end": datetime.now(timezone.utc).isoformat()})
                             st.rerun()
-                        # Display start time for running job
-                        st.info(f"Running since: {start.split('T')[1][:5]}")
+                        
+                        # Display start time converted to IST for user
+                        try:
+                            start_dt = datetime.fromisoformat(start)
+                            
+                            # Define IST timezone (UTC + 5:30)
+                            IST = timezone(timedelta(hours=5, minutes=30))
+                            
+                            # If the datetime is naive (old data), assume it's UTC
+                            if start_dt.tzinfo is None or start_dt.tzinfo.utcoffset(start_dt) is None:
+                                start_dt = start_dt.replace(tzinfo=timezone.utc)
+
+                            # Convert and format for IST display
+                            ist_dt = start_dt.astimezone(IST)
+                            formatted_datetime = ist_dt.strftime("%Y-%m-%d %H:%M IST")
+                            
+                            st.info(f"Running since: **{formatted_datetime}**")
+                            
+                        except ValueError:
+                            # Fallback if fromisoformat fails
+                            st.info(f"Running since (Raw): {start.split('T')[1][:5]}")
+
                     else:
                         st.success("Task Completed")
                         st.markdown(calculate_time_diff(start, end))
@@ -397,7 +432,8 @@ with tab1:
                     if st.button("🚀 Move to Packing", key=f"next_{order_id}", type="primary", use_container_width=True):
                         update(f"orders/{key}", {
                             "stage": "Packing",
-                            "assembly_completed_at": datetime.now().isoformat()
+                            # Save completion time as UTC
+                            "assembly_completed_at": datetime.now(timezone.utc).isoformat()
                         })
                         st.balloons()
                         st.rerun()
@@ -463,9 +499,20 @@ with tab2:
             with col_data:
                 st.markdown("#### Production Details")
                 
+                # Try to convert completion time to IST for display
+                try:
+                    comp_dt_utc = datetime.fromisoformat(o.get('assembly_completed_at', ''))
+                    IST = timezone(timedelta(hours=5, minutes=30))
+                    if comp_dt_utc.tzinfo is None or comp_dt_utc.tzinfo.utcoffset(comp_dt_utc) is None:
+                        comp_dt_utc = comp_dt_utc.replace(tzinfo=timezone.utc)
+                    
+                    comp_dt_ist = comp_dt_utc.astimezone(IST).strftime('%Y-%m-%d %H:%M IST')
+                except:
+                    comp_dt_ist = o.get('assembly_completed_at', 'N/A')
+                
                 st.markdown(f"""
                 - **Material Used:** `{o.get('assembly_material', 'N/A')}`
-                - **Completion Date/Time:** `{o.get('assembly_completed_at', 'N/A')}`
+                - **Completion Date/Time:** `{comp_dt_ist}`
                 """)
                 
                 st.markdown("##### Notes Recorded")
