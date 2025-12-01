@@ -71,9 +71,8 @@ def send_gmail(to, subject, html):
 
 # ---------------------------------------------------
 # PDF GENERATOR
-
 def generate_order_pdf(data, qr_b64):
-    logo_path = "srplogo.png"  # your logo path
+    logo_path = "srplogo.png"
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(temp_file.name, pagesize=A4)
@@ -82,24 +81,24 @@ def generate_order_pdf(data, qr_b64):
     x_margin = 40
 
     # ============================================================
-    #                 PREMIUM GREEN HEADER (PERFECTED)
+    #                 PREMIUM GREEN HEADER (FINAL VERSION)
     # ============================================================
 
-    HEADER_HEIGHT = 140
+    HEADER_HEIGHT = 160
 
-    # Full-width green bar
+    # Background green bar
     c.setFillColorRGB(0.05, 0.48, 0.22)
     c.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, stroke=0, fill=1)
 
     # -------------------------------
-    # LOGO (Left Side)
+    # BIG LOGO (Left Side)
     # -------------------------------
     try:
         c.drawImage(
             logo_path,
             x_margin,
-            height - HEADER_HEIGHT + 25,
-            width=95,
+            height - HEADER_HEIGHT + 30,
+            width=130,                   # BIGGER LOGO
             preserveAspectRatio=True,
             mask="auto"
         )
@@ -109,35 +108,38 @@ def generate_order_pdf(data, qr_b64):
     # --------------------------------
     # VERTICAL SEPARATOR LINE
     # --------------------------------
-    separator_x = x_margin + 130
+    separator_x = x_margin + 160       # moved right for bigger logo
     c.setStrokeColorRGB(1, 1, 1)
     c.setLineWidth(1.4)
     c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
 
     # --------------------------------
-    # COMPANY NAME BLOCK
+    # COMPANY NAME + TAGLINE (Centered Vertically)
     # --------------------------------
+    left_block_x = separator_x + 20
+    top_y = height - 60
+
     c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Bold", 26)
-    c.drawString(separator_x + 20, height - 50, "Shree Ram Packers")
+    c.setFont("Helvetica-Bold", 30)  # bigger title
+    c.drawString(left_block_x, top_y, "Shree Ram Packers")
 
-    c.setFont("Helvetica", 12)
-    c.drawString(separator_x + 20, height - 72, "Premium Packaging & Printing Solutions")
+    c.setFont("Helvetica", 14)
+    c.drawString(left_block_x, top_y - 25, "Premium Packaging & Printing Solutions")
 
     # --------------------------------
-    # RIGHT SIDE CLEAN INFO (NO ADDRESS)
+    # CONTACT DETAILS BELOW (Not inline)
     # --------------------------------
+    info_y = top_y - 55
     c.setFont("Helvetica", 12)
-    info_y = height - 50
 
-    right_details = [
+    contact_lines = [
         "Mobile: 9312215239",
         "GSTIN: 29BCIPK6225L1Z6",
         "Website: https://srppackaging.com/"
     ]
 
-    for line in right_details:
-        c.drawRightString(width - x_margin, info_y, line)
+    for line in contact_lines:
+        c.drawString(left_block_x, info_y, line)
         info_y -= 18
 
     # --------------------------------
@@ -145,21 +147,19 @@ def generate_order_pdf(data, qr_b64):
     # --------------------------------
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
     c.setLineWidth(3)
-    divider_y = height - HEADER_HEIGHT - 10
-    c.line(x_margin, divider_y, width - x_margin, divider_y)
+    c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
 
     # Reset colors
     c.setFillColorRGB(0, 0, 0)
-    y = divider_y - 40
+    y = height - HEADER_HEIGHT - 40
 
     # ============================================================
-    #                      CUSTOMER DETAILS
+    # CUSTOMER DETAILS
     # ============================================================
 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Customer Details")
     y -= 20
-    c.setLineWidth(0.6)
     c.line(x_margin, y, width - x_margin, y)
     y -= 15
 
@@ -181,7 +181,7 @@ def generate_order_pdf(data, qr_b64):
     y -= 15
 
     # ============================================================
-    #                         ORDER DETAILS
+    # ORDER DETAILS
     # ============================================================
 
     c.setFont("Helvetica-Bold", 14)
@@ -218,7 +218,7 @@ def generate_order_pdf(data, qr_b64):
     y -= 15
 
     # ============================================================
-    #                            QR CODE
+    # QR CODE
     # ============================================================
 
     qr_img = base64.b64decode(qr_b64)
@@ -234,7 +234,7 @@ def generate_order_pdf(data, qr_b64):
     c.drawImage(qr_temp.name, width - 180, y, width=130, height=130)
 
     # ============================================================
-    #                           FOOTER
+    # FOOTER
     # ============================================================
 
     c.setLineWidth(0.4)
@@ -247,7 +247,6 @@ def generate_order_pdf(data, qr_b64):
     c.save()
     return temp_file.name
 
-# ---------------------------------------------------
 # UI
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
