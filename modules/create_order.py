@@ -22,7 +22,7 @@ GMAIL_PASS = "your_app_password"
 
 
 # ---------------------------------------------------
-# QR CODE GENERATOR (UPDATED FOR NEW TRACKING PAGE)
+# QR CODE GENERATOR (Returns Base64 for display/email)
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
     tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
@@ -82,11 +82,10 @@ def send_gmail(to, subject, html):
 
 
 # ---------------------------------------------------
-# PDF GENERATOR FUNCTION (NEW 🔥)
+# PDF GENERATOR CLASS AND FUNCTION (FIXED QR CODE EMBEDDING 🔥)
 # ---------------------------------------------------
 class PDF(FPDF):
     def header(self):
-        # Logo
         # self.image('logo.png', 10, 8, 33) # Uncomment if you have a logo
         self.set_font('Arial', 'B', 15)
         self.cell(0, 10, 'SRP Packaging - Manufacturing Order', 0, 1, 'C')
@@ -113,7 +112,7 @@ class PDF(FPDF):
             self.set_font('Arial', 'B', 10)
             self.cell(col_width, 6, f"{key}:", 0, 0, 'L')
             self.set_font('Arial', '', 10)
-            # Encode to avoid fpdf unicode issues, also stringify all data
+            # Encode to latin-1 to avoid fpdf unicode errors
             self.multi_cell(0, 6, str(value).encode('latin-1', 'replace').decode('latin-1'), 0, 'L')
         self.ln(5)
 
@@ -146,22 +145,23 @@ def create_order_pdf(data: dict) -> bytes:
         "Advance Received": data['advance'],
     })
     
-    # Manufacturing IDs
+    # Manufacturing IDs (Corrected Board Thickness ID 🔥)
     pdf.chapter_title("Manufacturing IDs")
     pdf.chapter_body({
         "Foil ID": data['foil_id'],
         "Spot UV ID": data['spotuv_id'],
-        "Brand Thickness ID": data['brand_thickness_id'],
+        "Board Thickness ID": data['board_thickness_id'], 
         "Paper Thickness ID": data['paper_thickness_id'],
         "Size ID": data['size_id'],
     })
     
-    # QR Code for Tracking
+    # QR Code for Tracking (FIXED rfind ERROR 🔥)
     pdf.chapter_title("Live Tracking QR Code")
     qr_b64 = generate_qr_base64(data['order_id'])
     qr_img_data = base64.b64decode(qr_b64)
     with io.BytesIO(qr_img_data) as img_io:
-        pdf.image(img_io, x=80, y=pdf.get_y(), w=40)
+        # Crucial fix: Specify type='PNG' to resolve the rfind error
+        pdf.image(img_io, x=80, y=pdf.get_y(), w=40, type='PNG') 
     pdf.ln(50)
     
     # Convert PDF to bytes
@@ -198,7 +198,7 @@ if "previous_order" not in st.session_state:
 
 
 # =====================================================
-# STEP 1 – ORDER TYPE & CUSTOMER (Updated for validation 🔥)
+# STEP 1 – ORDER TYPE & CUSTOMER
 # =====================================================
 box = st.container(border=True)
 
@@ -217,15 +217,16 @@ with box:
         customer = ""
         customer_phone = ""
         customer_email = ""
-
+        
+        # New order form fields (Mandatory fields)
         if order_type_simple == "New":
-            # Made customer and phone mandatory with help text
-            customer = st.text_input("Customer Name **(Mandatory)**")
-            customer_phone = st.text_input("Customer Phone **(Mandatory)**")
-            customer_email = st.text_input("Customer Email")
+            customer = st.text_input("Customer Name **(Mandatory)**", key="new_customer_name")
+            customer_phone = st.text_input("Customer Phone **(Mandatory)**", key="new_customer_phone")
+            customer_email = st.text_input("Customer Email", key="new_customer_email")
 
+        # Repeat order form fields
         else:
-            selected = st.selectbox("Select Existing Customer", ["Select"] + customer_list)
+            selected = st.selectbox("Select Existing Customer", ["Select"] + customer_list, key="repeat_customer_select")
             if selected != "Select":
                 customer = selected
 
@@ -244,12 +245,12 @@ with box:
                     customer_phone = latest.get("customer_phone", "")
                     customer_email = latest.get("customer_email", "")
 
-                st.text_input("Phone", customer_phone, disabled=True)
-                st.text_input("Email", customer_email, disabled=True)
+                st.text_input("Phone (Auto-filled)", customer_phone, disabled=True)
+                st.text_input("Email (Auto-filled)", customer_email, disabled=True)
                 
-                # For Repeat Orders, we ensure the phone is available from the latest order
+                # Warning if essential data is missing for Repeat
                 if not customer_phone:
-                    st.warning("Customer phone number missing from the last order. Please update the customer's phone number.")
+                    st.warning("Customer phone number missing from the last order in database.")
 
 
 # =====================================================
@@ -257,7 +258,7 @@ with box:
 # =====================================================
 previous_order = None
 
-if order_type_simple == "Repeat" and customer:
+if order_type_simple == "Repeat" and customer and customer != "Select":
     cust_orders = {
         k: o for k, o in all_orders.items()
         if o.get("customer") == customer
@@ -274,7 +275,7 @@ if order_type_simple == "Repeat" and customer:
 
         options = [f"{o['order_id']} — {o['item']}" for o in sorted_orders]
 
-        sel = st.selectbox("Choose", ["--- Select ---"] + options)
+        sel = st.selectbox("Choose", ["--- Select ---"] + options, key="auto_fill_select")
 
         if sel != "--- Select ---":
             sel_id = sel.split("—")[0].strip()
@@ -282,7 +283,7 @@ if order_type_simple == "Repeat" and customer:
                 if o["order_id"] == sel_id:
                     previous_order = o
                     st.session_state["previous_order"] = previous_order
-                    st.success("Auto-fill applied!")
+                    st.success("Auto-fill applied! (Scroll to see changes)")
                     break
 
 st.session_state["previous_order"] = previous_order
@@ -291,7 +292,6 @@ st.session_state["previous_order"] = previous_order
 # =====================================================
 # STEP 3 — MAIN FORM
 # =====================================================
-# Added a placeholder to display submission status (e.g., validation errors)
 form_status = st.empty() 
 
 with st.form("order_form", clear_on_submit=True):
@@ -302,7 +302,7 @@ with st.form("order_form", clear_on_submit=True):
     order_id = generate_order_id()
     st.text_input("Order ID", order_id, disabled=True)
 
-    prev = previous_order or {}
+    prev = st.session_state["previous_order"] or {} # Use session state for auto-fill data
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -323,7 +323,10 @@ with st.form("order_form", clear_on_submit=True):
 
     foil = st.text_input("Foil ID", value=prev.get("foil_id",""))
     spotuv = st.text_input("Spot UV ID", value=prev.get("spotuv_id",""))
-    brand = st.text_input("Brand Thickness ID", value=prev.get("brand_thickness_id",""))
+    
+    # Corrected label for Board Thickness ID 🔥
+    board_thickness = st.text_input("Board Thickness ID", value=prev.get("board_thickness_id","")) 
+    
     paper = st.text_input("Paper Thickness ID", value=prev.get("paper_thickness_id",""))
     size = st.text_input("Size ID", value=prev.get("size_id",""))
 
@@ -335,11 +338,12 @@ with st.form("order_form", clear_on_submit=True):
 
     if submitted:
         # ---------------------------------
-        # VALIDATION (New 🔥)
+        # VALIDATION (Mandatory Customer Name and Phone 🔥)
         # ---------------------------------
         validation_error = False
+        
         if not customer or customer.strip() == "" or customer == "Select":
-            form_status.error("❌ Customer Name is mandatory.")
+            form_status.error("❌ Customer Name is mandatory. Please select an existing customer or enter a new name.")
             validation_error = True
         
         # Clean phone number for validation
@@ -357,8 +361,8 @@ with st.form("order_form", clear_on_submit=True):
         data = {
             "order_id": order_id,
             "customer": customer,
-            # Ensure we use the non-disabled/validated phone number
-            "customer_phone": customer_phone if order_type_simple == "New" else clean_phone, 
+            # Use the validated phone/email
+            "customer_phone": customer_phone, 
             "customer_email": customer_email,
             "type": order_type_simple,
             "product_type": product_type,
@@ -370,17 +374,12 @@ with st.form("order_form", clear_on_submit=True):
             "advance": advance,
             "foil_id": foil,
             "spotuv_id": spotuv,
-            "brand_thickness_id": brand,
+            "board_thickness_id": board_thickness, # Corrected Key 🔥
             "paper_thickness_id": paper,
             "size_id": size,
             "rate": rate,
             "stage": "Design",
         }
-        
-        # Update data for Repeat order if phone was pulled from latest order
-        if order_type_simple == "Repeat" and previous_order:
-             data["customer_phone"] = previous_order.get("customer_phone", "")
-             data["customer_email"] = previous_order.get("customer_email", "")
 
         push("orders", data)
         form_status.success("🎉 Order Created Successfully!")
@@ -390,13 +389,13 @@ with st.form("order_form", clear_on_submit=True):
         # POST-SUBMISSION ACTIONS
         # ---------------------------------
         
-        # Re-fetch the correct phone number after potential update from Repeat
         final_phone = data["customer_phone"]
         
         qr_b64 = generate_qr_base64(order_id)
         whatsapp_link = get_whatsapp_link(final_phone, order_id, customer)
+        
+        # Email functionality
         tracking_link = f"https://srppackaging.com/tracking.html?id={order_id}"
-
         html_email = f"""
         <h2>Your Order {order_id} is Created</h2>
         <p>Hello {customer},</p>
@@ -422,7 +421,7 @@ with st.form("order_form", clear_on_submit=True):
             st.subheader("Actions")
             st.markdown(f"[💬 Send Tracking Link via WhatsApp]({whatsapp_link})")
             
-            # PDF Download Button (New 🔥)
+            # PDF Download Button (Uses the fixed create_order_pdf function 🔥)
             pdf_bytes = create_order_pdf(data)
             st.download_button(
                 label="📄 Download Order PDF",
