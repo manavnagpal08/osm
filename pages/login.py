@@ -26,7 +26,7 @@ USERS = {
     "admin2": {"password": "admin123", "role": "admin"},
     "design01": {"password": "design123", "role": "design"},
     "print04": {"password": "print123", "role": "printing"},
-    "die01": {"password": "die123", "role": "diecut"},
+    "die02": {"password": "die123", "role": "diecut"},
     "assembly01": {"password": "assembly123", "role": "assembly"},
     "dispatch01": {"password": "dispatch123", "role": "dispatch"},
 }
