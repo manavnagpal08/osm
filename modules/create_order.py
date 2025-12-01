@@ -133,9 +133,6 @@ def generate_order_pdf(data, qr_b64):
     right_block_y = height - 50           # starting y
 
     right_details = [
-        "Plot No 54, Verrapa Reddy Layout, Parappana Agrahara,",
-        "Hosa Road, Electronic City Post, Bangalore - 560100, Karnataka",
-        "",
         "Mobile: 9312215239",
         "GSTIN: 29BCIPK6225L1Z6",
         "Website: https://srppackaging.com/"
