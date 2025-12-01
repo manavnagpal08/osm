@@ -12,6 +12,8 @@ import urllib.parse
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import tempfile
+from datetime import datetime, timezone, timedelta
+
 
 # ---------------------------------------------------
 # CONFIG
@@ -343,8 +345,10 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
 
     item = st.text_area("Product Description", value=prev.get("item", ""))
 
-    receive_date = st.date_input("Received Date", value=date.today())
-    due_date = st.date_input("Due Date", value=date.today())
+    
+    IST = timezone(timedelta(hours=5, minutes=30))
+    receive_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+    due_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
 
     advance = st.radio("Advance Received?", ["Yes", "No"])
 
@@ -390,8 +394,8 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
             "priority": priority,
             "item": item,
             "qty": qty,
-            "received": str(receive_date),
-            "due": str(due_date),
+            "received": receive_date,
+            "due": due_date,
             "advance": advance,
             "foil_id": foil,
             "spotuv_id": spotuv,
