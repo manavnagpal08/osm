@@ -176,6 +176,32 @@ def download_button(label, b64_data, order_id, fname, key_prefix):
     )
 
 # ---------------------------------------------------
+# FILE PREVIEW
+# ---------------------------------------------------
+def preview(label, b64):
+    """Previews an image or PDF placeholder."""
+    if not b64:
+        st.warning(f"{label} missing.")
+        return
+
+    raw = base64.b64decode(b64)
+    head = raw[:10]
+
+    st.markdown(f"#### 📄 {label} Preview")
+
+    if raw.startswith(b"%PDF"):
+        st.info("PDF detected — Please download to view.")
+    elif raw.startswith(b"\x89PNG") or raw[:3] == b"\xff\xd8\xff":
+        # Check if it's an image before displaying
+        try:
+            st.image(raw, use_container_width=True)
+        except Exception:
+            st.warning("File is uploaded but format is not suitable for inline preview.")
+    else:
+        st.caption("File type not suitable for inline preview (AI, ZIP, etc.).")
+
+
+# ---------------------------------------------------
 # PURE PYTHON PDF SLIP GENERATOR
 # ---------------------------------------------------
 def generate_lamination_slip(order, film_type, temp, pressure, assign_to, qc_status):
@@ -275,6 +301,7 @@ with tab1:
         
     for key, o in filtered_pending.items():
         order_id = o["order_id"]
+        lamination_file = o.get("lamination_file")
         
         # Determine the next stage
         is_box = o.get("product_type", "").lower() == "box"
@@ -373,7 +400,6 @@ with tab1:
                     key=f"assign_{order_id}"
                 )
 
-
             notes = st.text_area(
                 "Notes (Lamination)",
                 value=notes_current,
@@ -394,21 +420,47 @@ with tab1:
 
             st.divider()
 
-            # ---------------- SLIP DOWNLOAD ----------------
-            st.subheader("📄 Download Job Slip")
-            
-            slip_bytes = generate_lamination_slip(
-                o, film_type, temp, pressure, assign_to, qc_status
-            )
+            # ---------------- FILE UPLOAD & SLIP DOWNLOAD ----------------
+            col_file, col_slip = st.columns(2)
 
-            st.download_button(
-                label="⬇ Download Lamination Slip (PDF)",
-                data=slip_bytes,
-                file_name=f"{order_id}_lamination_slip.pdf",
-                mime="application/pdf",
-                key=f"slip_dl_{order_id}",
-                use_container_width=True
-            )
+            with col_file:
+                st.subheader("📁 Upload Lamination Output Proof")
+                up = st.file_uploader(
+                    "Upload File (Final Proof Image/PDF)",
+                    type=["pdf", "png", "jpg"],
+                    key=f"upl_{order_id}"
+                )
+
+                if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True, disabled=not up):
+                    if up:
+                        up.seek(0)
+                        encoded = base64.b64encode(up.read()).decode()
+                        update(f"orders/{key}", {"lamination_file": encoded})
+                        st.success("File Uploaded!")
+                        st.rerun()
+
+                if lamination_file:
+                    st.markdown("---")
+                    preview("Current Lamination Proof", lamination_file)
+                    download_button("⬇ Download Current File", lamination_file, order_id, "lamination_proof", f"dl_{order_id}")
+
+
+            with col_slip:
+                st.subheader("📄 Download Job Slip")
+                st.info("Ensure details are saved before generating slip.")
+                
+                slip_bytes = generate_lamination_slip(
+                    o, film_type, temp, pressure, assign_to, qc_status
+                )
+
+                st.download_button(
+                    label="⬇ Download Lamination Slip (PDF)",
+                    data=slip_bytes,
+                    file_name=f"{order_id}_lamination_slip.pdf",
+                    mime="application/pdf",
+                    key=f"slip_dl_{order_id}",
+                    use_container_width=True
+                )
             
             st.divider()
 
@@ -440,6 +492,7 @@ with tab2:
 
     for key, o in filtered_completed.items():
         order_id = o.get("order_id")
+        lamination_file_b64 = o.get("lamination_file")
         
         start_time = o.get("lamination_start")
         end_time = o.get("lamination_end")
@@ -470,5 +523,9 @@ with tab2:
             
             # Notes
             st.markdown(f"**Notes:** {o.get('lamination_notes', 'No notes recorded.')}")
+
+            if lamination_file_b64:
+                st.markdown("---")
+                download_button("⬇ Download Archived Proof", lamination_file_b64, order_id, "lamination_archived_proof", f"dl2_{order_id}")
 
             st.markdown("---")
