@@ -56,7 +56,7 @@ def set_sticky_filter_state(key, value):
         st.error(f"Error saving filter state for {key}: {e}")
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (Fixes for .dt Accessor and DateColumn)
+# LOAD & PRE-PROCESS ORDERS (Enhanced Fix for .dt Accessor and DateColumn)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -96,14 +96,19 @@ def load_and_process_orders():
     # Data Quality: Convert all time fields to a uniform UTC datetime dtype
     for key in stage_times.values():
         if key in df.columns:
-            # ⭐ FIX: Force conversion to datetime64[ns, UTC] using pd.to_datetime
+            # Force conversion to datetime64[ns, UTC]
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
 
+    # ⭐ ENHANCED FIX for '.dt' error: Ensure the core 'received' column is datetime64
+    # This step is redundant if the above loop works, but acts as a final safeguard.
+    if 'received' in df.columns and df['received'].dtype != 'datetime64[ns, UTC]':
+         df['received'] = pd.to_datetime(df['received'], utc=True, errors='coerce')
 
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
     # Fix for DateColumn error: convert Timestamp to Python date object
+    # This is safe because df['due'] is now a datetime64 Series (from the loop above).
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
     # Calculate Time-In-Stage (Advanced Metric)
@@ -117,7 +122,6 @@ def load_and_process_orders():
             
             duration_timedelta = (df[end_col] - df[start_col])
             
-            # This .dt accessor is now safe because df[end_col] and df[start_col] are datetime64
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
@@ -152,7 +156,6 @@ col1.metric("Total Orders", len(df))
 col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
 col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
             delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
-# ⭐ FIX: This .dt accessor is now safe
 col4.metric("Orders This Month", 
             len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]))
 col5.metric("Avg Order Qty", f"{df['Qty'].mean():.0f}" if 'Qty' in df else "N/A")
