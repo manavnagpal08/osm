@@ -52,6 +52,7 @@ def calculate_time_diff(start: Optional[str], end: Optional[str]) -> str:
             t1 = datetime.fromisoformat(start)
             t2 = datetime.fromisoformat(end)
             diff = t2 - t1
+            # Format time difference to exclude microseconds
             return f"Total Time: **{str(diff).split('.')[0]}**"
         except:
             return "Time Calculation Error"
@@ -80,6 +81,8 @@ def preview_ui(label: str, b64: Optional[str], order_id: str):
     file_type, _, _ = detect_file_type(b64)
     
     with st.expander(f"🖼️ View {label} ({file_type.upper()})"):
+        
+        # Try image
         if file_type in ["png", "jpg"]:
             st.image(raw, use_container_width=True)
         elif file_type == "pdf":
@@ -118,6 +121,9 @@ def download_button_ui(label: str, b64: Optional[str], order_id: str, fname: str
 # PURE PYTHON PDF SLIP
 # -----------------------------------------
 def generate_slip(order, assembled_qty, assign_to, material, notes):
+    
+    # Use UTC for standard ISO formatting if needed, but for the slip, local time is fine
+    now = datetime.now() 
 
     lines = [
         "ASSEMBLY DEPARTMENT – WORK SLIP",
@@ -126,7 +132,7 @@ def generate_slip(order, assembled_qty, assign_to, material, notes):
         f"Order ID: {order.get('order_id')}",
         f"Customer: {order.get('customer')}",
         f"Item: {order.get('item')}",
-        f"Order Quantity: {order.get('qty'):,}",
+        f"Order Quantity: {order.get('qty', 0):,}",
         f"Assembled Quantity: {assembled_qty:,}",
         f"Remaining: {max(order.get('qty', 0) - assembled_qty, 0):,}",
         "",
@@ -136,16 +142,18 @@ def generate_slip(order, assembled_qty, assign_to, material, notes):
         "Notes:",
         notes or "No special notes.",
         "",
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"Generated: {now.strftime('%Y-%m-%d %H:%M')}"
     ]
 
     def esc(t): return t.replace("(", "\\(").replace(")", "\\)")
 
+    # PDF text assembly (keeping original positioning for stability)
     pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
     for ln in lines:
         pdf_text += f"({esc(ln)}) Tj\n0 -18 Td\n"
     pdf_text += "ET"
 
+    # PDF Structure (Simple Text/Courier Font) - original structure retained
     pdf = f"""%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
@@ -216,29 +224,36 @@ with tab1:
             col_id.markdown(f"### 📦 Order {order_id}")
             col_id.caption(f"**Customer:** {o.get('customer')} | **Item:** {o.get('item')}")
             
-            priority_emoji = {"High": "🚨", "Medium": "🟡", "Low": "🔵"}.get(o.get("priority", "Medium"), "⚪")
+            # Display Priority
             col_priority.metric("Priority", o.get("priority", "Medium"), help="Job Priority")
             
             # ---------------- DEADLINE WATCH ----------------
             start_design_out = o.get("printing_completed_at") or o.get("diecut_completed_at")
             
-            status_text = "N/A"
+            status_text = "N/A (No previous stage completion time)"
+            
+            # Check if there is a completion time from a previous relevant stage
             if start_design_out:
-                start_time = datetime.fromisoformat(start_design_out)
-                # Assembly is given 36 hours from the completion of the previous step
-                deadline = start_time + timedelta(hours=36)
-                now = datetime.now()
-                
-                if now > deadline:
-                    remaining = now - deadline
-                    col_status.error(f"⛔ OVERDUE by {str(remaining).split('.')[0]}")
-                    status_text = f"OVERDUE: {str(remaining).split('.')[0]}"
-                else:
-                    remaining = deadline - now
-                    col_status.success(f"🟢 Remaining: {str(remaining).split('.')[0]}")
-                    status_text = f"Remaining: {str(remaining).split('.')[0]}"
+                try:
+                    start_time = datetime.fromisoformat(start_design_out)
+                    # Assembly is given 36 hours from the completion of the previous step
+                    deadline = start_time + timedelta(hours=36)
+                    now = datetime.now()
+                    
+                    if now > deadline:
+                        remaining = now - deadline
+                        col_status.error(f"⛔ OVERDUE by {str(remaining).split('.')[0]}")
+                        status_text = f"OVERDUE: {str(remaining).split('.')[0]}"
+                    else:
+                        remaining = deadline - now
+                        col_status.success(f"🟢 Remaining: {str(remaining).split('.')[0]}")
+                        status_text = f"Remaining: {str(remaining).split('.')[0]}"
+                except:
+                    # Handle invalid datetime format if necessary
+                    col_status.warning("Cannot calculate deadline (Time Format Error)")
+                    status_text = "Error in time calculation"
 
-            col_status.caption(f"Time since prev. stage completion: {status_text}")
+            col_status.caption(f"Time since previous stage completion: {status_text}")
             
             st.divider()
 
@@ -267,6 +282,7 @@ with tab1:
                         if st.button("⏹ End Assembly", key=f"end_{order_id}", use_container_width=True, type="primary"):
                             update(f"orders/{key}", {"assembly_end": datetime.now().isoformat()})
                             st.rerun()
+                        # Display start time for running job
                         st.info(f"Running since: {start.split('T')[1][:5]}")
                     else:
                         st.success("Task Completed")
@@ -293,7 +309,9 @@ with tab1:
                     max_value=qty,
                     value=assembled_qty,
                     key=f"asmqty_{order_id}",
-                    help=f"Total units required: {qty}"
+                    help=f"Total units required: {qty}",
+                    # Ensure the saved value is used if the user hasn't interacted with it yet
+                    # Streamlit handles this state, but we ensure max_value limits input.
                 )
 
                 assign_to = st.text_input(
@@ -319,7 +337,7 @@ with tab1:
 
                 if st.button("💾 Save All Details", key=f"save_{order_id}", use_container_width=True, type="secondary"):
                     update(f"orders/{key}", {
-                        "assembled_qty": assembled_qty_input,
+                        "assembled_qty": int(assembled_qty_input), # Save as integer
                         "assembly_assigned_to": assign_to,
                         "assembly_material": material,
                         "assembly_notes": notes
@@ -355,6 +373,7 @@ with tab1:
 
                 # --- SLIP DOWNLOAD ---
                 st.subheader("📄 Job Slip")
+                # Use the saved values for the slip generation
                 slip = generate_slip(o, assembled_qty_input, assign_to, material, notes)
                 
                 st.download_button(
@@ -404,7 +423,7 @@ with tab1:
 
 
 # -----------------------------------------
-# COMPLETED TAB (IMPROVED UI)
+# COMPLETED TAB (Redesigned UI - NO JSON)
 # -----------------------------------------
 with tab2:
     if not completed:
@@ -424,14 +443,18 @@ with tab2:
         file_asm = o.get("assembly_file")
         start = o.get("assembly_start")
         end = o.get("assembly_end")
+        
+        # Use short date format for the expander title
+        completion_date = o.get('assembly_completed_at', 'N/A').split('T')[0]
 
-        with st.expander(f"✅ {order_id} — {o['customer']} | Completed: {o.get('assembly_completed_at', '').split('T')[0]}"):
+        with st.expander(f"✅ {order_id} — {o.get('customer', 'N/A')} | Completed: {completion_date}"):
             
+            st.markdown("#### Summary")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Job Time", calculate_time_diff(start, end))
             c2.metric("Assigned To", o.get("assembly_assigned_to", "N/A"))
             c3.metric("Assembled Qty", f"{o.get('assembled_qty', 0):,}")
-            c4.metric("Next Stage", o.get("stage", "N/A"))
+            c4.metric("Order Quantity", f"{o.get('qty', 0):,}")
             
             st.divider()
             
@@ -439,11 +462,14 @@ with tab2:
 
             with col_data:
                 st.markdown("#### Production Details")
-                st.json({
-                    "Material Used": o.get("assembly_material", "N/A"),
-                    "Order Notes": o.get("assembly_notes", "None"),
-                    "Completion Time": o.get('assembly_completed_at', 'N/A')
-                })
+                
+                st.markdown(f"""
+                - **Material Used:** `{o.get('assembly_material', 'N/A')}`
+                - **Completion Date/Time:** `{o.get('assembly_completed_at', 'N/A')}`
+                """)
+                
+                st.markdown("##### Notes Recorded")
+                st.info(o.get("assembly_notes", "No notes recorded."))
             
             with col_files:
                 st.markdown("#### Final Output File")
@@ -453,7 +479,7 @@ with tab2:
                         "⬇ Download Final Output", 
                         file_asm, 
                         order_id, 
-                        f"assembly_final_{order_id}"
+                        f"assembly_final"
                     )
                 else:
                     st.warning("No final file uploaded.")
