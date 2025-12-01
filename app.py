@@ -53,55 +53,40 @@ def load_page(page_file):
 
 def login_screen():
 
+    # --- RESET LOGIN BUTTON ON FIRST PAGE LOAD ---
+    if "login_button_triggered" not in st.session_state:
+        st.session_state.login_button_fix = False
+        st.session_state.login_button_triggered = True
+
     st.markdown("""
     <style>
         [data-testid="stSidebar"] {display: none !important;}
         [data-testid="collapsedControl"] {display: none !important;}
-        button[kind="header"] {display:none !important;}
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h1 style='font-size:45px;'>🔐 Debug Login</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:45px;'>🔐 Login to OMS</h1>", unsafe_allow_html=True)
 
-    st.subheader("🟦 DEBUG MODE ENABLED")
+    username = st.text_input("Username", key="login_username_field")
+    password = st.text_input("Password", type="password", key="login_password_field")
 
-    username = st.text_input("Username", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
+    clicked = st.button("Login", key="login_button_fixed")
 
-    # 🔥 DUMP COMPLETE STATE BEFORE CLICK
-    st.write("🔍 DEBUG BEFORE CLICK")
-    st.write("username widget =", username)
-    st.write("password widget =", password)
-    st.write("session_state =", dict(st.session_state))
-    st.write("all widget keys =", list(st.session_state.keys()))
+    # --------- FIX: Prevent FIRST false click ---------
+    if not st.session_state.get("login_button_fix") and clicked:
+        st.session_state.login_button_fix = True
+        st.rerun()
 
-    if st.button("Login", key="login_button"):
-        st.write("🔥 BUTTON CLICKED — DEBUG INFO BELOW")
-
-        # 🔥 DUMP AGAIN INSIDE BUTTON
-        st.write("username (raw) =", username)
-        st.write("password (raw) =", password)
-
+    # After rerun, process normally
+    if clicked:
         username_clean = username.strip()
         password_clean = password.strip()
-
-        st.write("username_clean =", username_clean)
-        st.write("password_clean =", password_clean)
-
-        # 🔥 Check for empty
-        if username_clean == "":
-            st.error("❌ USERNAME IS EMPTY INTERNALLY")
-        if password_clean == "":
-            st.error("❌ PASSWORD IS EMPTY INTERNALLY")
 
         if not username_clean or not password_clean:
             st.error("Please enter both username and password.")
             return
 
-        # Firebase call debug
-        st.write("Calling get_user with:", username_clean)
         user = get_user(username_clean)
-        st.write("Firebase returned:", user)
 
         if not user:
             st.error("User not found.")
@@ -111,11 +96,12 @@ def login_screen():
             st.error("Incorrect password.")
             return
 
-        st.session_state["username"] = username_clean
-        st.session_state["role"] = user["role"]
+        st.session_state.username = username_clean
+        st.session_state.role = user["role"]
 
         st.success("Login successful!")
         st.rerun()
+
 
 # ---------------------------------------------------------
 # SIDEBAR FOR ADMIN
