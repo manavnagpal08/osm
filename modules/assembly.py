@@ -261,9 +261,15 @@ with tab1:
                         remaining = deadline - now
                         col_status.success(f"🟢 Remaining: {str(remaining).split('.')[0]}")
                         status_text = f"Remaining: {str(remaining).split('.')[0]}"
-                except:
-                    # Handle invalid datetime format if necessary
+                except ValueError as e:
+                    # Handle invalid datetime format
                     col_status.warning("Cannot calculate deadline (Time Format Error)")
+                    status_text = "Error in time calculation"
+                    # Log the error and the problematic value for debugging
+                    st.exception(f"Order ID {order_id}: Failed to parse timestamp '{start_design_out}'. Error: {e}") 
+                except Exception:
+                    # Handle other potential errors
+                    col_status.warning("Cannot calculate deadline (Unknown Error)")
                     status_text = "Error in time calculation"
 
             col_status.caption(f"Time since previous stage completion: {status_text}")
