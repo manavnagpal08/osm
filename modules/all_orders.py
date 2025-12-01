@@ -35,17 +35,13 @@ def calculate_priority_score(row):
     Calculates a numerical priority score based on Priority and Time to Deadline.
     Higher score means more critical.
     """
-    # Base score: High=3, Medium=2, Low=1
     score_map = {"High": 3, "Medium": 2, "Low": 1}
     base_score = score_map.get(row['priority'], 1)
     
     time_to_deadline = row.get('Time_To_Deadline', 100)
     
-    # Modifier: If overdue (negative days), greatly increase score.
     if time_to_deadline < 0:
-        # Penalize heavily for each day overdue
         modifier = 100 + abs(time_to_deadline) * 5 
-    # If deadline is within 3 days, slightly increase score
     elif time_to_deadline <= 3:
         modifier = (3 - time_to_deadline) * 2
     else:
@@ -79,7 +75,7 @@ def set_sticky_filter_state(key, value):
 # ADMIN ACCESS & PAGE SETUP
 # ------------------------------------------------------------------------------------
 
-st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide") 
+st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (Read-Only)", layout="wide") 
 
 if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.error("❌ Access Denied — Admin Only")
@@ -133,15 +129,15 @@ def load_and_process_orders():
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
-    # Convert Timestamp to a Python date object for st.data_editor compatibility
+    # Convert Timestamp to a Python date object for display compatibility
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
     # --- Advanced Metric: Time to Deadline ---
     current_time = datetime.now(timezone.utc)
     time_delta = df['due'] - current_time
-    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) # Days
+    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) 
 
-    # --- NEW Advanced Feature: Priority Score ---
+    # --- Advanced Feature: Priority Score ---
     df['Priority_Score'] = df.apply(calculate_priority_score, axis=1)
 
     # Calculate Time-In-Stage
@@ -219,15 +215,11 @@ if priority_filter != "All":
 if df_filtered.empty:
     st.warning("No orders match the current filter criteria.")
 
-# ------------------------------------------------------------------------------------
-## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)
-# ------------------------------------------------------------------------------------
-st.markdown("## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)")
 
-# Select columns for display and editing
+# Select columns for display (Read-only)
 df_display = df_filtered[[
     "order_id", "customer", "customer_phone", "item", "Qty", 
-    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score", "firebase_id"
+    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score" 
 ]].rename(columns={
     "customer_phone": "Phone",
     "order_id": "Order ID",
@@ -237,103 +229,65 @@ df_display = df_filtered[[
     "priority": "Priority",
     "Time_To_Deadline": "Deadline (Days)",
     "Priority_Score": "Score",
-    "firebase_id": "Firebase ID" # Keep this rename for update logic clarity
 })
 
-# **CRITICAL FIX:** Drop the Firebase ID column from the DataFrame displayed in the editor
-# but keep the original index and all other columns.
-df_display_for_editor = df_display.drop(columns=["Firebase ID"])
+# ------------------------------------------------------------------------------------
+## 📋 Orders Table Spaces (Read-Only)
+# ------------------------------------------------------------------------------------
+st.markdown("## 📋 Order Management Spaces")
 
+tab1, tab2, tab3 = st.tabs(["**All Filtered Orders**", "**Pending Orders** ⏳", "**Stored Products** 📦"])
 
-# Define the data editor configuration for inline editing
-# This config only includes the columns that are VISIBLE in df_display_for_editor
-column_config = {
-    "Order ID": st.column_config.TextColumn("Order ID", disabled=True),
-    "Customer": st.column_config.TextColumn("Customer Name", required=True),
-    "Phone": st.column_config.TextColumn("Customer Phone"),
-    "Item": st.column_config.TextColumn("Item / Product", disabled=True),
-    "Qty": st.column_config.NumberColumn("Qty", required=True, min_value=0),
-    "Stage": st.column_config.TextColumn("Stage", disabled=True),
-    "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
-    "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True), 
-    "Deadline (Days)": st.column_config.NumberColumn(
-        "Deadline (Days)",
-        help="Days remaining until the deadline (negative means overdue)",
-        format="%.1f days",
-        disabled=True
-    ),
-    "Score": st.column_config.NumberColumn(
-        "Score",
-        help="Calculated priority based on deadline proximity and manual priority.",
-        format="%.1f",
-        disabled=True
-    ),
-    # The 'Firebase ID' column is no longer included in the config.
-}
+# Tab 1: All Filtered Orders
+with tab1:
+    st.markdown("### All Orders (Filtered View)")
+    st.dataframe(
+        df_display,
+        hide_index=True,
+        use_container_width=True,
+        # Apply a simple styling for deadlines
+        column_styler={
+            "Deadline (Days)": st.column_config.NumberColumn(
+                "Deadline (Days)", format="%.1f days",
+                help="Days remaining until the deadline (negative means overdue)",
+                
+            )
+        }
+    )
 
-edited_df_output = st.data_editor(
-    df_display_for_editor, # Pass the DataFrame *without* the Firebase ID
-    column_config=column_config,
-    hide_index=True,
-    use_container_width=True,
-    num_rows="fixed", 
-    key="orders_data_editor"
-)
-
-# Check for changes and update Firebase
-if st.session_state.orders_data_editor['edited_rows']:
-    st.info("🚨 Changes detected in the table. Applying updates to Firebase...")
+# Tab 2: Pending Orders (Not completed or dispatched)
+with tab2:
+    st.markdown("### Pending Production Orders")
+    df_pending = df_display[~df_display['Stage'].isin(['Completed', 'Dispatch'])]
     
-    edited_rows = st.session_state.orders_data_editor['edited_rows']
+    if df_pending.empty:
+        st.info("🎉 No outstanding orders currently in production!")
+    else:
+        st.dataframe(
+            df_pending.sort_values(by="Score", ascending=False),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+# Tab 3: Stored Products (In the storage stage)
+with tab3:
+    st.markdown("### Products Ready for Dispatch (Storage)")
+    df_stored = df_display[df_display['Stage'] == 'Storage']
     
-    # CRITICAL FIX: Use the index of the original df_display (which *has* Firebase ID)
-    # to find the corresponding Firebase ID for the update.
-    original_indices = df_display_for_editor.iloc[list(edited_rows.keys())].index
-
-    for original_index_value in original_indices:
-        
-        # Safely locate the firebase_id and order_id using the original index value
-        original_firebase_id = df_display.loc[original_index_value, 'Firebase ID']
-        order_id_for_toast = df_display.loc[original_index_value, 'Order ID']
-        
-        # Get the row data from the edited output to apply changes
-        position = list(edited_rows.keys())[list(original_indices).index(original_index_value)]
-        edits = edited_rows[position]
-        
-        update_data = {}
-        
-        if 'Customer' in edits:
-            update_data['customer'] = edits['Customer']
-        if 'Phone' in edits:
-            update_data['customer_phone'] = edits['Phone']
-        if 'Qty' in edits:
-            update_data['qty'] = int(edits['Qty'])
-        if 'Priority' in edits:
-            update_data['priority'] = edits['Priority']
-        if 'Due_Date' in edits:
-            try:
-                date_obj = edits['Due_Date']
-                dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
-                update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
-            except ValueError:
-                st.error(f"Invalid date format for order {order_id_for_toast}. Date not updated.")
-                continue
-
-        if update_data:
-            update(f"orders/{original_firebase_id}", update_data)
-            st.toast(f"✅ Updated Order ID: {order_id_for_toast}", icon='💾')
-
-    time.sleep(0.5) 
-    st.session_state.orders_data_editor['edited_rows'] = {}
-    st.cache_data.clear()
-    st.rerun()
+    if df_stored.empty:
+        st.info("📦 No products currently awaiting pickup or dispatch in storage.")
+    else:
+        st.dataframe(
+            df_stored.sort_values(by="Due_Date", ascending=True),
+            hide_index=True,
+            use_container_width=True,
+        )
 
 st.markdown("---")
 
 ## ⚡ Actions
 colA, colB = st.columns(2)
 
-# Export uses the full df_filtered data
 csv_export = df_filtered.to_csv(index=False).encode()
 colA.download_button(
     "📥 Export Filtered Data to CSV", csv_export, "orders_filtered_export.csv", "text/csv"
