@@ -82,12 +82,12 @@ def generate_order_pdf(data, qr_b64):
     x_margin = 40
 
     # ============================================================
-    #                 PREMIUM GREEN HEADER (FULLY FIXED)
+    #                 PREMIUM GREEN HEADER (PERFECTED)
     # ============================================================
 
     HEADER_HEIGHT = 140
 
-    # Full-width green header background
+    # Full-width green bar
     c.setFillColorRGB(0.05, 0.48, 0.22)
     c.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, stroke=0, fill=1)
 
@@ -98,8 +98,8 @@ def generate_order_pdf(data, qr_b64):
         c.drawImage(
             logo_path,
             x_margin,
-            height - HEADER_HEIGHT + 20,
-            width=90,
+            height - HEADER_HEIGHT + 25,
+            width=95,
             preserveAspectRatio=True,
             mask="auto"
         )
@@ -109,28 +109,26 @@ def generate_order_pdf(data, qr_b64):
     # --------------------------------
     # VERTICAL SEPARATOR LINE
     # --------------------------------
+    separator_x = x_margin + 130
     c.setStrokeColorRGB(1, 1, 1)
     c.setLineWidth(1.4)
-    c.line(x_margin + 120, height - HEADER_HEIGHT + 15, x_margin + 120, height - 15)
+    c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
 
     # --------------------------------
-    # COMPANY NAME + TAGLINE
+    # COMPANY NAME BLOCK
     # --------------------------------
     c.setFillColorRGB(1, 1, 1)
     c.setFont("Helvetica-Bold", 26)
-    c.drawString(x_margin + 140, height - 55, "Shree Ram Packers")
+    c.drawString(separator_x + 20, height - 50, "Shree Ram Packers")
 
     c.setFont("Helvetica", 12)
-    c.drawString(x_margin + 140, height - 75, "Premium Packaging & Printing Solutions")
+    c.drawString(separator_x + 20, height - 72, "Premium Packaging & Printing Solutions")
 
     # --------------------------------
-    # RIGHT-ALIGNED COMPANY INFO
+    # RIGHT SIDE CLEAN INFO (NO ADDRESS)
     # --------------------------------
-
-    c.setFont("Helvetica", 11)
-
-    right_block_x = width - x_margin      # right-align anchor
-    right_block_y = height - 50           # starting y
+    c.setFont("Helvetica", 12)
+    info_y = height - 50
 
     right_details = [
         "Mobile: 9312215239",
@@ -139,19 +137,20 @@ def generate_order_pdf(data, qr_b64):
     ]
 
     for line in right_details:
-        c.drawRightString(right_block_x, right_block_y, line)
-        right_block_y -= 15
+        c.drawRightString(width - x_margin, info_y, line)
+        info_y -= 18
 
     # --------------------------------
     # GREEN DIVIDER UNDER HEADER
     # --------------------------------
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
     c.setLineWidth(3)
-    c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
+    divider_y = height - HEADER_HEIGHT - 10
+    c.line(x_margin, divider_y, width - x_margin, divider_y)
 
-    # Reset text color
+    # Reset colors
     c.setFillColorRGB(0, 0, 0)
-    y = height - HEADER_HEIGHT - 40
+    y = divider_y - 40
 
     # ============================================================
     #                      CUSTOMER DETAILS
@@ -182,13 +181,12 @@ def generate_order_pdf(data, qr_b64):
     y -= 15
 
     # ============================================================
-    #                          ORDER DETAILS
+    #                         ORDER DETAILS
     # ============================================================
 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Order Details")
     y -= 20
-    c.setLineWidth(0.6)
     c.line(x_margin, y, width - x_margin, y)
     y -= 20
 
@@ -220,7 +218,7 @@ def generate_order_pdf(data, qr_b64):
     y -= 15
 
     # ============================================================
-    #                          QR CODE
+    #                            QR CODE
     # ============================================================
 
     qr_img = base64.b64decode(qr_b64)
