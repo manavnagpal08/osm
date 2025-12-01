@@ -69,6 +69,7 @@ def calculate_stage_duration(start_time: Optional[str], end_time: Optional[str])
     if start_time and end_time:
         try:
             # We call get_stage_seconds with a mock order dict to leverage the cache
+            # The structure of the dict and keys here are just for the cache utility function
             diff_seconds = get_stage_seconds({'start': start_time, 'end': end_time}, 'start', 'end')
             if diff_seconds is not None:
                  return f"**{format_seconds_to_hms(diff_seconds)}**"
@@ -294,7 +295,7 @@ dq_chart = alt.Chart(dq_df).mark_bar().encode(
     x=alt.X('Missing Count', title='Number of Orders Missing Data'),
     y=alt.Y('Critical Field', sort='x', title='Required Field'),
     tooltip=['Critical Field', 'Missing Count', alt.Tooltip('Missing %', format='.1f')],
-    # Using 'reds' scheme for sequential coloring based on severity
+    # Using 'reds' (a valid sequential scheme)
     color=alt.Color('Missing %', scale=alt.Scale(scheme='reds'), legend=None)
 ).properties(
     title="Count of Orders Missing Critical Data Fields"
@@ -459,8 +460,8 @@ with col_viz2:
         chart = alt.Chart(avg_df).mark_bar().encode(
             x=alt.X('Stage', sort=list(avg_stage_times_seconds.keys())),
             y=alt.Y('Avg Time (Min)', title='Average Duration (Minutes)'),
-            # FIX applied: Use 'scheme' for named color palettes
-            color=alt.Color('Avg Time (Min)', scale=alt.Scale(scheme='yelloworange-red'), legend=alt.Legend(title="Avg Time (Min)")),
+            # FIX APPLIED HERE: Changed invalid 'yelloworange-red' to valid 'yelloworangered'
+            color=alt.Color('Avg Time (Min)', scale=alt.Scale(scheme='yelloworangered'), legend=alt.Legend(title="Avg Time (Min)")),
             tooltip=['Stage', alt.Tooltip('Avg Time (Min)', format='.2f')]
         ).properties(
             title="Stage Time Breakdown (Highest time is the Bottleneck)"
@@ -673,6 +674,7 @@ with col_sum_1:
     )
 
 st.divider()
+
 st.subheader("Individual Order Details")
 
 for key, order in sorted_filtered_list:
