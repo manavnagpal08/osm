@@ -456,7 +456,7 @@ with tab1:
                 if is_ready:
                     if st.button("🚀 Move to Packing", key=f"next_{order_id}", type="primary", use_container_width=True):
                         update(f"orders/{key}", {
-                            "stage": "Packing",
+                            "stage": "Assembly",
                             # Save completion time as UTC
                             "assembly_completed_at": datetime.now(timezone.utc).isoformat()
                         })
