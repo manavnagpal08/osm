@@ -1,5 +1,5 @@
 import streamlit as st
-from packaging import version
+import os
 
 # ----------------------------------------
 # PAGE CONFIG
@@ -10,97 +10,89 @@ st.set_page_config(page_title="OMS Dashboard", layout="wide")
 # LOGIN CHECK
 # ----------------------------------------
 if "role" not in st.session_state:
-    st.switch_page("app_pages/login.py")
+    st.switch_page("login.py")
 
 role = st.session_state["role"]
+username = st.session_state["username"]
 
 # ----------------------------------------
-# UNIVERSAL SIDEBAR DISABLER (WORKS ALWAYS)
+# UNIVERSAL SIDEBAR REMOVAL (WORKS 100%)
 # ----------------------------------------
 if role != "admin":
     st.markdown("""
         <style>
+            /* Hide ALL possible sidebars */
+            aside, nav, section[aria-label="sidebar"],
+            [data-testid="stSidebar"], [data-testid="stSidebarNav"],
+            [data-testid="collapsedControl"],
+            button[kind="header"],
+            div[class*="sidebar"], div[id*="sidebar"] {
+                display: none !important;
+                visibility: hidden !important;
+                width: 0 !important;
+                min-width: 0 !important;
+            }
 
-        /* REMOVE ASIDE COMPLETELY (NEW STREAMLIT) */
-        aside, nav, section[aria-label="sidebar"] {
-            display: none !important;
-            visibility: hidden !important;
-            width: 0 !important;
-            min-width: 0 !important;
-        }
-
-        /* TARGET ANY POSSIBLE SIDEBAR WRAPPER */
-        [id*="__sidebar__"],
-        [class*="sidebar"],
-        [data-testid*="sidebar"],
-        [data-testid*="stSidebar"],
-        div[id*="stSidebar"],
-        div[class*="stSidebar"],
-        div:has(nav[aria-label="Sidebar"]) {
-            display: none !important;
-            visibility: hidden !important;
-            width: 0 !important;
-            min-width: 0 !important;
-            max-width: 0 !important;
-        }
-
-        /* REMOVE THE HAMBURGER MENU ALWAYS */
-        button[kind="header"],
-        [data-testid="collapsedControl"],
-        [title="Toggle sidebar"] {
-            display: none !important;
-            visibility: hidden !important;
-        }
-
-        /* FORCE FULL WIDTH ALWAYS */
-        .block-container, [data-testid="stAppViewContainer"] {
-            max-width: 100% !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            margin-left: 0 !important;
-        }
-
+            /* Full width layout */
+            [data-testid="stAppViewContainer"] {
+                margin-left: 0 !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
-# TITLE & ROLE
+# ----------------------------------------
+# PAGE LOADER
+# ----------------------------------------
+def load_page(file_path):
+    """Load a page by executing its Python file."""
+    full_path = os.path.join("modules", file_path)
+    if os.path.exists(full_path):
+        with open(full_path, "r") as f:
+            code = compile(f.read(), full_path, 'exec')
+            exec(code, globals())
+    else:
+        st.error(f"Page not found: {file_path}")
+
+# ----------------------------------------
+# TITLE
 # ----------------------------------------
 st.title("📦 Order Management System")
-st.caption(f"Logged in as **{st.session_state['username']}** | Role: {role}")
+st.caption(f"Logged in as **{username}** | Role: {role}")
 
 # ----------------------------------------
-# PAGE MAPPING
+# ROLE → PAGE MAPPING
 # ----------------------------------------
-pages = {}
+role_pages = {
+    "design": "create_order.py",
+    "printing": "printing.py",
+    "diecut": "diecut.py",
+    "assembly": "assembly.py",
+    "dispatch": "dispatch.py",
+}
 
-if role in ["admin", "design"]:
-    pages["Create Order"] = "app_pages/create_order.py"
-    pages["Design Dept"] = "app_pages/design.py"
-
-if role in ["admin", "printing"]:
-    pages["Printing Dept"] = "app_pages/printing.py"
-
-if role in ["admin", "diecut"]:
-    pages["Die-Cut Dept"] = "app_pages/diecut.py"
-
-if role in ["admin", "assembly"]:
-    pages["Assembly Dept"] = "app_pages/assembly.py"
-
-if role in ["admin", "dispatch"]:
-    pages["Dispatch Dept"] = "app_pages/dispatch.py"
+admin_pages = {
+    "Create Order": "create_order.py",
+    "Design Dept": "design.py",
+    "Printing Dept": "printing.py",
+    "Die-Cut Dept": "diecut.py",
+    "Assembly Dept": "assembly.py",
+    "Dispatch Dept": "dispatch.py",
+}
 
 # ----------------------------------------
-# ADMIN – SHOW SIDEBAR
+# ADMIN → CUSTOM SIDEBAR
 # ----------------------------------------
 if role == "admin":
-    choice = st.sidebar.selectbox("Navigate", list(pages.keys()))
-    st.switch_page(pages[choice])
+    choice = st.sidebar.selectbox("Navigate", list(admin_pages.keys()))
+    load_page(admin_pages[choice])
 
 # ----------------------------------------
-# NON ADMIN – AUTO REDIRECT
+# NON-ADMIN → AUTO-REDIRECT TO THEIR PAGE
 # ----------------------------------------
 else:
-    if len(pages) == 1:
-        st.switch_page(list(pages.values())[0])
+    if role in role_pages:
+        load_page(role_pages[role])
     else:
-        st.error("No page assigned to your role.")
+        st.error("Your role has no assigned page. Contact admin.")
