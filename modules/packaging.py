@@ -4,7 +4,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 
 
-st.set_page_config(page_title="Logistics Department", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="Logistics Department (DEBUG MODE)", page_icon="🚚", layout="wide")
 
 # ---------------- ROLE CHECK ----------------
 if "role" not in st.session_state:
@@ -18,69 +18,91 @@ if st.session_state["role"] not in ["admin", "dispatch", "packaging"]:
 USER = st.session_state["username"]
 
 
+# ---------------- DEBUG READ FROM FIREBASE ----------------
+st.header("🟡 DEBUG: RAW FIREBASE ORDERS")
+try:
+    raw_orders = read("orders") or {}
+    st.json(raw_orders)
+except Exception as e:
+    st.error(f"❌ ERROR reading Firebase: {e}")
+    raw_orders = {}
+
+st.markdown("---")
+
 # ---------------- LOAD ORDERS ----------------
-@st.cache_data(ttl=1)
-def load_orders():
-    try:
-        orders = read("orders") or {}
-    except:
-        orders = {}
+def load_orders_debug():
+    st.subheader("🟡 DEBUG: STAGE GROUPING")
 
-    incoming = {}      # stage = Assembly (completed & ready)
-    storage = {}       # stage = Storage
-    dispatch = {}      # stage = Dispatch
-    completed = {}     # stage = Completed
+    incoming = {}
+    storage = {}
+    dispatch = {}
+    completed = {}
 
-    for key, o in orders.items():
-        if not isinstance(o, dict):
-            continue
+    for k, o in raw_orders.items():
+        s = o.get("stage")
+        st.write(f"Order {k} → Stage = {s}")
 
-        s = o.get("stage", "")
-
-        if s == "Assembly":      # from assembly page
-            incoming[key] = o
-
+        if s == "Assembly":
+            incoming[k] = o
         elif s == "Storage":
-            storage[key] = o
-
+            storage[k] = o
         elif s == "Dispatch":
-            dispatch[key] = o
-
+            dispatch[k] = o
         elif s == "Completed":
-            completed[key] = o
+            completed[k] = o
+        else:
+            st.warning(f"⚠️ UNKNOWN STAGE: {s} for {k}")
+
+    st.markdown("### 🟢 Incoming Keys:")
+    st.code(list(incoming.keys()))
+
+    st.markdown("### 🟣 Storage Keys:")
+    st.code(list(storage.keys()))
+
+    st.markdown("### 🔵 Dispatch Keys:")
+    st.code(list(dispatch.keys()))
+
+    st.markdown("### 🟢 Completed Keys:")
+    st.code(list(completed.keys()))
 
     return incoming, storage, dispatch, completed
 
 
-incoming, storage, dispatch, completed = load_orders()
+incoming, storage, dispatch, completed = load_orders_debug()
+st.markdown("---")
 
 
 # ---------------- UTILS ----------------
 def parse_dt(s):
     if not s:
+        st.warning("parse_dt() received EMPTY")
         return None
     try:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
-    except:
+    except Exception as e:
+        st.error(f"❌ parse_dt ERROR: '{s}' → {e}")
         return None
 
 
 def dl_qr_ui(b64):
     if not b64:
         return
-    raw = base64.b64decode(b64 + "===")
-    st.download_button("⬇ Download QR", raw, "order_qr.png", "image/png", use_container_width=True)
+    try:
+        raw = base64.b64decode(b64 + "===")
+        st.download_button("⬇ Download QR", raw, "order_qr.png", "image/png")
+    except Exception as e:
+        st.error(f"QR decode failed: {e}")
 
 
 # ---------------- TABS ----------------
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📥 Incoming From Assembly",
+    "📥 Incoming",
     "🏬 Storage",
     "🚀 Dispatch Queue",
-    "✅ Completed Orders"
+    "✅ Completed"
 ])
 
 # ============================================================
@@ -88,155 +110,76 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # ============================================================
 with tab1:
 
-    st.subheader(f"Incoming Orders From Assembly ({len(incoming)})")
+    st.subheader("📥 DEBUG: Incoming From Assembly")
+    st.code(incoming)
 
     if len(incoming) == 0:
-        st.success("🎉 No incoming assembly orders.")
+        st.error("❌ No incoming orders found. Check stages in Firebase above.")
         st.stop()
 
-    # ---- MULTI SELECT ----
-    selected = []
-    colA, colB = st.columns([0.2, 0.8])
-
-    with colA:
-        select_all = st.checkbox("Select All")
-
-    with colB:
-        bulk_action = st.selectbox(
-            "Apply Action:",
-            ["None", "Move Selected to Storage", "Move Selected to Dispatch"]
-        )
-
-    if select_all:
-        selected = list(incoming.keys())
-
-    # ---- BULK ACTION ----
-    if bulk_action != "None" and selected:
-        now = datetime.now(timezone.utc).isoformat()
-
-        if bulk_action == "Move Selected to Storage":
-            for k in selected:
-                update(f"orders/{k}", {
-                    "stage": "Storage",
-                    "storage_started_at": now
-                })
-            st.success(f"{len(selected)} orders moved to Storage.")
-            st.rerun()
-
-        if bulk_action == "Move Selected to Dispatch":
-            for k in selected:
-                update(f"orders/{k}", {
-                    "stage": "Dispatch",
-                    "storage_completed_at": now
-                })
-            st.success(f"{len(selected)} orders moved to Dispatch.")
-            st.rerun()
-
-    st.markdown("---")
-
-    # ---- LIST ORDERS ----
     for key, o in incoming.items():
 
+        st.markdown(f"### 🟡 DEBUG ORDER {key}")
+        st.json(o)
+
         order_id = o.get("order_id")
-        item = o.get("item")
-        customer = o.get("customer")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-        assembly_time = parse_dt(o.get("assembly_completed_at"))
+        assembly_done = parse_dt(o.get("assembly_completed_at"))
 
         with st.container(border=True):
+            st.write(f"Order ID: {order_id}")
+            st.write(f"Stage: {o.get('stage')}")
+            st.write(f"assembly_completed_at: {o.get('assembly_completed_at')}")
+            st.write(f"parsed time: {assembly_done}")
 
-            cols = st.columns([0.1, 3, 1, 1, 2, 2])
+            col1, col2 = st.columns(2)
 
-            # Select checkbox
-            with cols[0]:
-                chk = st.checkbox("", key=f"sel_{key}")
-                if chk:
-                    selected.append(key)
-
-            cols[1].markdown(f"### {order_id} — {item}")
-            cols[1].caption(f"Customer: {customer}")
-
-            cols[2].metric("Qty", qty)
-            cols[3].metric("Priority", priority)
-
-            # Time since assembly
-            with cols[4]:
-                if assembly_time:
-                    diff = datetime.now(timezone.utc) - assembly_time
-                    st.info(f"{str(diff).split('.')[0]}")
-                else:
-                    st.warning("N/A")
-
-            # QR
-            with cols[5]:
-                qr = o.get("order_qr")
-                if qr:
-                    st.image(base64.b64decode(qr), width=90)
-
-            # --- ACTION BUTTONS ---
-            b1, b2 = st.columns(2)
-
-            if b1.button("🏬 Move to Storage", key=f"to_store_{key}", use_container_width=True):
+            if col1.button(f"Move {order_id} to Storage", key=f"m_s_{key}"):
                 update(f"orders/{key}", {
                     "stage": "Storage",
                     "storage_started_at": datetime.now(timezone.utc).isoformat()
                 })
+                st.success(f"{order_id} moved to STORAGE")
                 st.rerun()
 
-            if b2.button("🚀 Move to Dispatch", key=f"to_disp_{key}", use_container_width=True):
+            if col2.button(f"Move {order_id} to Dispatch", key=f"m_d_{key}"):
                 update(f"orders/{key}", {
                     "stage": "Dispatch",
                     "storage_completed_at": datetime.now(timezone.utc).isoformat()
                 })
+                st.success(f"{order_id} moved to DISPATCH")
                 st.rerun()
-
-        st.markdown("---")
-
 
 # ============================================================
 # TAB 2 → STORAGE
 # ============================================================
 with tab2:
 
-    st.subheader(f"Orders in Storage ({len(storage)})")
+    st.subheader("🏬 DEBUG: STORAGE ITEMS")
+    st.code(storage)
 
     if len(storage) == 0:
-        st.info("No orders in storage.")
+        st.warning("Storage empty.")
         st.stop()
 
     for key, o in storage.items():
 
+        st.markdown(f"### 🟣 DEBUG STORAGE ORDER {key}")
+        st.json(o)
+
         order_id = o.get("order_id")
-        item = o.get("item")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-
-        started_raw = o.get("storage_started_at")
-        started = parse_dt(started_raw) if started_raw else None
-
-        time_in_storage = "N/A"
-        if started:
-            time_in_storage = str(datetime.now(timezone.utc) - started).split(".")[0]
+        started = parse_dt(o.get("storage_started_at"))
 
         with st.container(border=True):
+            st.write(f"Storage Started: {o.get('storage_started_at')}")
+            st.write(f"parsed: {started}")
 
-            cols = st.columns([3, 1, 1, 2, 1])
-
-            cols[0].markdown(f"### {order_id} — {item}")
-            cols[1].metric("Qty", qty)
-            cols[2].metric("Priority", priority)
-            cols[3].metric("Time in Storage", time_in_storage)
-
-            with cols[4]:
-                if st.button("🚀 Move to Dispatch", key=f"s2d_{key}", use_container_width=True):
-                    update(f"orders/{key}", {
-                        "stage": "Dispatch",
-                        "storage_completed_at": datetime.now(timezone.utc).isoformat()
-                    })
-                    st.rerun()
-
-        st.markdown("---")
+            if st.button(f"Move {order_id} to Dispatch", key=f"s2d_{key}"):
+                update(f"orders/{key}", {
+                    "stage": "Dispatch",
+                    "storage_completed_at": datetime.now(timezone.utc).isoformat()
+                })
+                st.success("Moved to Dispatch")
+                st.rerun()
 
 
 # ============================================================
@@ -244,61 +187,37 @@ with tab2:
 # ============================================================
 with tab3:
 
-    st.subheader(f"Pending Dispatch ({len(dispatch)})")
+    st.subheader("🚀 DEBUG: DISPATCH QUEUE")
+    st.code(dispatch)
 
     if len(dispatch) == 0:
-        st.info("No orders waiting for dispatch.")
+        st.warning("Dispatch queue empty.")
         st.stop()
 
     for key, o in dispatch.items():
 
-        order_id = o.get("order_id")
-        item = o.get("item")
-        qty = o.get("qty")
-        priority = o.get("priority", "Medium")
-        qr = o.get("order_qr")
+        st.markdown(f"### 🔵 DEBUG DISPATCH ORDER {key}")
+        st.json(o)
 
-        with st.container(border=True):
+        courier = st.text_input("Courier", o.get("courier", ""), key=f"c_{key}")
+        tracking = st.text_input("Tracking", o.get("tracking_number", ""), key=f"t_{key}")
 
-            cols = st.columns([3, 1, 1, 2])
+        if st.button(f"Save {key}", key=f"sav_{key}"):
+            update(f"orders/{key}", {
+                "courier": courier,
+                "tracking_number": tracking
+            })
+            st.success("Saved.")
+            st.rerun()
 
-            cols[0].markdown(f"### {order_id} — {item}")
-            cols[1].metric("Qty", qty)
-            cols[2].metric("Priority", priority)
-
-            with cols[3]:
-                if qr:
-                    st.image(base64.b64decode(qr), width=80)
-
-            st.markdown("#### Dispatch Details")
-
-            courier = st.text_input("Courier", o.get("courier", ""), key=f"courier_{key}")
-            tracking = st.text_input("Tracking No.", o.get("tracking_number", ""), key=f"track_{key}")
-            notes = st.text_area("Notes", o.get("dispatch_notes", ""), key=f"notes_{key}")
-
-            c1, c2 = st.columns(2)
-
-            if c1.button("💾 Save", key=f"save_{key}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "courier": courier,
-                    "tracking_number": tracking,
-                    "dispatch_notes": notes
-                })
-                st.success("Saved")
-                st.rerun()
-
-            if c2.button("🎉 Mark Completed", key=f"done_{key}", use_container_width=True):
-                now = datetime.now(timezone.utc).isoformat()
-                update(f"orders/{key}", {
-                    "stage": "Completed",
-                    "completed_at": now,
-                    "dispatch_completed_at": now,
-                    "dispatch_completed_by": USER
-                })
-                st.balloons()
-                st.rerun()
-
-        st.markdown("---")
+        if st.button(f"Complete {key}", key=f"comp_{key}"):
+            now = datetime.now(timezone.utc).isoformat()
+            update(f"orders/{key}", {
+                "stage": "Completed",
+                "completed_at": now
+            })
+            st.success("Completed.")
+            st.rerun()
 
 
 # ============================================================
@@ -306,32 +225,13 @@ with tab3:
 # ============================================================
 with tab4:
 
-    st.subheader(f"Completed Orders ({len(completed)})")
+    st.subheader("🏁 DEBUG: COMPLETED ORDERS")
+    st.code(completed)
 
     if len(completed) == 0:
-        st.info("No completed orders yet.")
+        st.warning("No completed orders.")
         st.stop()
 
     for key, o in completed.items():
-
-        order_id = o.get("order_id")
-        item = o.get("item")
-        courier = o.get("courier", "N/A")
-        tracking = o.get("tracking_number", "N/A")
-        notes = o.get("dispatch_notes", "N/A")
-        qr = o.get("order_qr")
-
-        completed_dt = parse_dt(o.get("completed_at"))
-        completed_txt = completed_dt.strftime("%Y-%m-%d %H:%M") if completed_dt else "N/A"
-
-        with st.expander(f"✅ {order_id} — {item}"):
-            st.markdown(f"**Courier:** {courier}")
-            st.markdown(f"**Tracking:** {tracking}")
-            st.markdown(f"**Completed At:** {completed_txt}")
-            st.markdown(f"**Notes:** {notes}")
-
-            if qr:
-                st.image(base64.b64decode(qr), width=120)
-                dl_qr_ui(qr)
-
-        st.markdown("---")
+        st.json(o)
+        st.write(f"Completed at: {o.get('completed_at')}")
