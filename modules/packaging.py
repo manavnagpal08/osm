@@ -1,5 +1,8 @@
 import streamlit as st
-from firebase import read, update
+# NOTE: The 'firebase' module used below is assumed to be a custom wrapper
+# for connecting to a database (like Firebase Realtime DB or Firestore).
+# You must have this module (with read/update functions) available in your environment.
+from firebase import read, update 
 import base64
 import io
 import qrcode
@@ -13,18 +16,18 @@ st.set_page_config(page_title="Logistics Department", page_icon="🚚", layout="
 # ---------------- ROLE & USER CHECK ----------------
 REQUIRED_ROLES = ["packaging", "dispatch", "admin"]
 if "role" not in st.session_state:
-    # Assuming pages/login.py is the correct entry point
-    # st.switch_page("pages/login.py") 
-    pass # Keep for local testing if login is not implemented
+    # In a real app, you would redirect to a login page here.
+    # st.switch_page("pages/login.py")
+    pass 
 
-if st.session_state.get("role") not in REQUIRED_ROLES:
-    st.error("❌ You do not have permission to access this page. Required roles: Packaging, Dispatch, Admin.")
-    # st.stop() # Uncomment in a live, secured environment
-
-# Placeholder for user identity if not logged in
+# Placeholder for user identity if not logged in (for local testing)
 if "role" not in st.session_state:
     st.session_state["role"] = "admin" # Default for testing
     st.session_state["username"] = "TestUser"
+    
+if st.session_state.get("role") not in REQUIRED_ROLES:
+    st.error("❌ You do not have permission to access this page. Required roles: Packaging, Dispatch, Admin.")
+    st.stop()
     
 USER_IDENTITY = st.session_state.get("username", st.session_state["role"]) 
 st.markdown(f"### 👋 Logged in as: **{USER_IDENTITY}** ({st.session_state['role'].title()})")
@@ -36,8 +39,13 @@ st.caption("Manage orders through the Packing, Storage, and Dispatch stages with
 # ---------------- LOAD ORDERS ----------------
 @st.cache_data(ttl=1) # Cache data for 1 second to improve responsiveness
 def load_and_categorize_orders():
-    orders = read("orders") or {}
-    
+    # Attempt to read data from the database.
+    try:
+        orders = read("orders") or {}
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")
+        orders = {}
+        
     pending_packing: Dict[str, Any] = {}
     pending_storage: Dict[str, Any] = {}
     pending_dispatch: Dict[str, Any] = {}
@@ -84,7 +92,7 @@ with col_c:
 st.markdown("---")
 
 
-# ---------------- FILTERING LOGIC ----------------
+# ---------------- FILTERING & SORTING LOGIC ----------------
 def apply_filters(orders_dict: Dict[str, Any], search_term: str, priority_filter: str, customer_filter: str) -> List[Tuple[str, Any]]:
     """Applies global filters (search, priority, customer) to an order dictionary."""
     filtered_list = []
@@ -123,7 +131,6 @@ def apply_filters(orders_dict: Dict[str, Any], search_term: str, priority_filter
     # Determine the correct timestamp for sorting based on the stage
     current_stage = next(iter(orders_dict.values())).get("stage", "Packing") if orders_dict else "Packing"
     
-    # Define sort key map
     sort_key_map = {
         "Packing": "assembly_completed_at",
         "Storage": "packing_completed_at",
@@ -131,7 +138,6 @@ def apply_filters(orders_dict: Dict[str, Any], search_term: str, priority_filter
         "Completed": "completed_at"
     }
     
-    # Custom sort for Dispatch to use storage_completed_at OR packing_completed_at
     def dispatch_sort_key(item):
         o = item[1]
         timestamp = o.get("storage_completed_at") or o.get("packing_completed_at") or "2099-12-31"
@@ -143,7 +149,6 @@ def apply_filters(orders_dict: Dict[str, Any], search_term: str, priority_filter
     if current_stage == "Dispatch":
         sorted_results = sorted(filtered_list, key=dispatch_sort_key)
     elif current_stage == "Completed":
-        # Sort completed in reverse (newest first)
         sorted_results = sorted(
             filtered_list, 
             key=lambda x: (x[1].get(sort_key_map["Completed"], "0000-01-01")), 
@@ -151,7 +156,6 @@ def apply_filters(orders_dict: Dict[str, Any], search_term: str, priority_filter
         )
     else:
         sort_key = sort_key_map.get(current_stage, "assembly_completed_at")
-        # Standard sorting for Packing and Storage
         sorted_results = sorted(
             filtered_list,
             key=lambda x: (
@@ -400,10 +404,6 @@ with tab1:
                 if qr_b64:
                     qr_col, dl_col = st.columns([1, 1])
                     with qr_col:
-                        # 
-
-[Image of QR code for order tracking]
-
                         st.image(base64.b64decode(qr_b64), width=150)
                     with dl_col:
                         st.markdown("For quick scanning & audit.")
@@ -562,6 +562,7 @@ with tab2:
                     )
                 else:
                     st.warning("No final file uploaded.")
+        st.markdown("---")
 
 # =================================================================
 # TAB 3: PENDING DISPATCH
