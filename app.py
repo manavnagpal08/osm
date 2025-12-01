@@ -1,53 +1,6 @@
 import streamlit as st
 import os
-import json
-
-# ----------------------------------------
-# FIREBASE MODULE ACCESS & INITIALIZATION
-# ----------------------------------------
-
-# We remove the failing st.globals.get() calls. We rely on the environment 
-# to make these functions available, and we use a simple try/except block 
-# to catch the ultimate failure if they are not defined.
-try:
-    from firebase import initializeApp, getFirestore, collection, doc, getDoc, getAuth
-    # Note: signInWithCustomToken and signInAnonymously are not needed in this
-    # main router file, as authentication is assumed to be handled before execution.
-except ImportError as e:
-    # If the standard import fails, Firebase functions are definitively unavailable.
-    st.error(f"FATAL ERROR: Essential Firebase SDK functions are unavailable. Import failed: {e}")
-    st.stop()
-
-
-# Re-initialize the app components safely for module access
-appId = locals().get('__app_id', 'default-app-id')
-config_str = locals().get('__firebase_config', '{}')
-
-try:
-    firebaseConfig = json.loads(config_str)
-except json.JSONDecodeError:
-    st.error("Configuration error: Invalid Firebase config JSON in app.py.")
-    st.stop()
-
-# Initialize Firebase App and Firestore DB
-try:
-    # We explicitly try to re-initialize here to ensure db/app references are set for this script.
-    app = initializeApp(firebaseConfig)
-    db = getFirestore(app)
-except Exception as e:
-    st.error(f"Error initializing Firebase in app.py: {e}")
-    st.stop()
-
-# Define the common collection path helper
-def get_users_collection():
-    """Returns the reference to the public 'users' collection."""
-    # Path: /artifacts/{appId}/public/data/users
-    path = f"artifacts/{appId}/public/data/users"
-    return collection(db, path)
-
-
-# --- DEBUG: Start of App ---
-st.write("--- DEBUG: APP START ---")
+from firebase import read, update
 
 # ---------------------------------------------------------
 # PAGE CONFIG
@@ -66,35 +19,18 @@ DEFAULT_ADMIN = {
 
 
 # ---------------------------------------------------------
-# GET USER FROM FIRESTORE (FIXED)
+# GET USER FROM FIREBASE
 # ---------------------------------------------------------
 def get_user(username):
-    # --- DEBUG: get_user called ---
-    st.write(f"DEBUG: get_user called for username: {username}")
-    
-    # 1. Check if the requested user is the fallback default admin
+    fb_user = read(f"users/{username}")
+
+    if isinstance(fb_user, dict):
+        return fb_user
+
     if username == DEFAULT_ADMIN["username"]:
-        st.write("DEBUG: Using DEFAULT_ADMIN fallback.")
         return DEFAULT_ADMIN
 
-    # 2. Try fetching from Firebase Firestore
-    try:
-        users_ref = get_users_collection()
-        doc_ref = doc(users_ref, username)
-        doc_snapshot = getDoc(doc_ref)
-
-        if doc_snapshot.exists:
-            user_data = doc_snapshot.to_dict()
-            st.write(f"DEBUG: User found in Firebase with role: {user_data.get('role')}")
-            return user_data
-        
-        st.write("DEBUG: User not found in Firestore.")
-        return None
-
-    except Exception as e:
-        st.error(f"Error reading user from database: {e}")
-        st.write(f"DEBUG: Firestore read failed: {e}")
-        return None
+    return None
 
 
 # ---------------------------------------------------------
@@ -102,26 +38,21 @@ def get_user(username):
 # ---------------------------------------------------------
 def load_page(page_file):
     full_path = os.path.join("modules", page_file)
-    st.write(f"DEBUG: Attempting to load module from path: {full_path}")
-    
     if os.path.exists(full_path):
-        try:
-            with open(full_path, "r") as f:
-                code = compile(f.read(), full_path, "exec")
-                exec(code, globals())
-            st.write(f"DEBUG: Successfully loaded module: {page_file}")
-        except Exception as e:
-            st.error(f"Error executing page {page_file}: {e}")
-            st.write(f"DEBUG: Error during module execution: {e}")
+        with open(full_path, "r") as f:
+            code = compile(f.read(), full_path, "exec")
+            exec(code, globals())
     else:
         st.error(f"Page not found: {page_file}")
-        st.write(f"DEBUG: Module file not found: {full_path}")
 
 
 # ---------------------------------------------------------
 # LOGIN SCREEN
 # ---------------------------------------------------------
+
+
 def login_screen():
+
     st.markdown("""
     <style>
         [data-testid="stSidebar"] {display: none !important;}
@@ -130,47 +61,67 @@ def login_screen():
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h1 style='font-size:45px;'>🔐 Login to OMS</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:45px;'>🔐 Debug Login</h1>", unsafe_allow_html=True)
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    st.subheader("🟦 DEBUG MODE ENABLED")
 
-    if st.button("Login"):
-        username = username.strip()
-        password = password.strip()
-        
-        st.write(f"DEBUG: Login button clicked. Input Username: {username}")
+    username = st.text_input("Username", key="login_username")
+    password = st.text_input("Password", type="password", key="login_password")
 
-        if not username or not password:
+    # 🔥 DUMP COMPLETE STATE BEFORE CLICK
+    st.write("🔍 DEBUG BEFORE CLICK")
+    st.write("username widget =", username)
+    st.write("password widget =", password)
+    st.write("session_state =", dict(st.session_state))
+    st.write("all widget keys =", list(st.session_state.keys()))
+
+    if st.button("Login", key="login_button"):
+        st.write("🔥 BUTTON CLICKED — DEBUG INFO BELOW")
+
+        # 🔥 DUMP AGAIN INSIDE BUTTON
+        st.write("username (raw) =", username)
+        st.write("password (raw) =", password)
+
+        username_clean = username.strip()
+        password_clean = password.strip()
+
+        st.write("username_clean =", username_clean)
+        st.write("password_clean =", password_clean)
+
+        # 🔥 Check for empty
+        if username_clean == "":
+            st.error("❌ USERNAME IS EMPTY INTERNALLY")
+        if password_clean == "":
+            st.error("❌ PASSWORD IS EMPTY INTERNALLY")
+
+        if not username_clean or not password_clean:
             st.error("Please enter both username and password.")
             return
 
-        user = get_user(username)
+        # Firebase call debug
+        st.write("Calling get_user with:", username_clean)
+        user = get_user(username_clean)
+        st.write("Firebase returned:", user)
 
         if not user:
             st.error("User not found.")
-            st.write("DEBUG: Login failed: User not found.")
             return
 
-        if user.get("password") != password:
+        if user.get("password") != password_clean:
             st.error("Incorrect password.")
-            st.write("DEBUG: Login failed: Password mismatch.")
             return
 
-        # SUCCESS LOGIN
-        st.session_state["username"] = username
+        st.session_state["username"] = username_clean
         st.session_state["role"] = user["role"]
-        
-        st.write(f"DEBUG: Login successful! Role set to: {st.session_state['role']}")
-        st.rerun()
 
+        st.success("Login successful!")
+        st.rerun()
 
 # ---------------------------------------------------------
 # SIDEBAR FOR ADMIN
 # ---------------------------------------------------------
 def admin_sidebar():
     st.sidebar.markdown("### 🧭 Navigation")
-    st.write("DEBUG: Admin sidebar activated.")
 
     menu = {
         "Create Order": ("📦", "create_order.py"),
@@ -193,9 +144,7 @@ def admin_sidebar():
     )
 
     st.session_state.menu_choice = choice
-    icon, file = menu[choice]
-    
-    st.write(f"DEBUG: Admin sidebar selected choice: {choice}. File: {file}")
+    _, file = menu[choice]
     load_page(file)
 
 
@@ -204,35 +153,26 @@ def admin_sidebar():
 # ---------------------------------------------------------
 def department_router():
     role = st.session_state["role"]
-    st.write(f"DEBUG: Department router activated for role: {role}")
 
     page_map = {
-        "design": "design.py",
+        "design": "create_order.py",
         "printing": "printing.py",
         "diecut": "diecut.py",
         "assembly": "assembly.py",
         "packaging": "packaging.py",
-        # Added 'lamination' for completeness as it appeared in manage_users.py
-        "lamination": "lamination.py" 
     }
 
     file = page_map.get(role)
-    
-    st.write(f"DEBUG: Department page file determined: {file}")
-
     if file:
         load_page(file)
     else:
-        st.error(f"No page assigned to your role ({role}).")
+        st.error("No page assigned to your role.")
 
 
 # ---------------------------------------------------------
 # APP ENTRY POINT
 # ---------------------------------------------------------
-st.write(f"DEBUG: Checking session state for 'role': {'role' in st.session_state}")
-
 if "role" not in st.session_state:
-    st.write("DEBUG: Role not found. Calling login screen.")
     login_screen()
     st.stop()
 
@@ -240,11 +180,7 @@ if "role" not in st.session_state:
 st.title("📦 OMS Management System")
 st.caption(f"Logged in as **{st.session_state['username']}** | Role: {st.session_state['role']}")
 
-st.write(f"DEBUG: User is logged in. Routing based on role: {st.session_state['role']}")
-
 if st.session_state["role"] == "admin":
     admin_sidebar()
 else:
     department_router()
-    
-st.write("--- DEBUG: APP END ---")
