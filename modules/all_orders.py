@@ -333,12 +333,15 @@ col5.metric(
     delta=on_time_delta, 
     delta_color="normal" if on_time_rate >= ON_TIME_RATE_TARGET else "inverse"
 )
+# --- UPDATED SLA VIOLATION METRIC ---
 col6.metric(
-    "SLA Violation Count",
+    "Critical SLA Breaches", # Updated Label for emphasis
     sla_violation_count,
-    delta=f"Completed orders > {SLA_CYCLE_TIME_HOURS} hrs",
-    delta_color="inverse" if sla_violation_count > 0 else "normal"
+    # Delta removed as requested
+    delta_color="inverse" if sla_violation_count > 0 else "normal", # Inverse (red) if > 0, Normal (green) if 0
+    help=f"Count of completed orders where the total cycle time exceeded the SLA target of {SLA_CYCLE_TIME_HOURS} hours (7 days)."
 )
+# --- END UPDATED METRIC ---
 col7.metric(
     "Data Quality Score", 
     data_quality_percent, 
