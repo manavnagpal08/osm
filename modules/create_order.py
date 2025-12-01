@@ -378,7 +378,8 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
         if len("".join(filter(str.isdigit, customer_phone))) < 10:
             st.error("⚠️ Enter a valid phone number.")
             st.stop()
-
+        qr_b64 = generate_qr_base64(order_id)
+        
         data = {
             "order_id": order_id,
             "customer": customer,
