@@ -1,13 +1,11 @@
 import streamlit as st
-from firebase import read, push, update  # your REST-based Firebase wrapper
+from firebase import update
 
-st.title("👤 User Management (Admin Only)")
+st.title("👤 User Management")
 
-st.subheader("Create New User")
-
-username = st.text_input("Username")
+username = st.text_input("New Username")
 password = st.text_input("Password", type="password")
-role = st.selectbox("Role", [
+role = st.selectbox("Select Role", [
     "admin",
     "design",
     "printing",
@@ -18,13 +16,12 @@ role = st.selectbox("Role", [
 
 if st.button("Create User"):
     if username.strip() == "" or password.strip() == "":
-        st.error("Please enter username and password")
+        st.error("Please fill all fields.")
     else:
         data = {
             "username": username,
             "password": password,
             "role": role
         }
-        # save to Firestore
-        update("users", username, data)   # update() replaces or creates document
+        update(f"users/{username}", data)
         st.success(f"User '{username}' created successfully!")
