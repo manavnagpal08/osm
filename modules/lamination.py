@@ -1,131 +1,86 @@
-import streamlit as st
-from firebase import read, update
 import base64
 from datetime import datetime
+import pytz
 
-# ---------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------
-st.set_page_config(
-    page_title="Lamination Department",
-    layout="wide",
-    page_icon="🟦"
-)
+# Using IST timezone for consistency
+IST = pytz.timezone("Asia/Kolkata")
 
-# ---------------------------------------------------
-# ROLE CHECK
-# ---------------------------------------------------
-if "role" not in st.session_state:
-    st.switch_page("pages/login.py")
+def generate_delivery_summary_pdf(order: dict) -> bytes:
+    """
+    Generates a comprehensive Delivery Note and Job Summary PDF
+    using pure Python/PDF format.
+    
+    Args:
+        order: The dictionary containing all order data.
+        
+    Returns:
+        The PDF content as bytes.
+    """
+    
+    # --- 1. EXTRACT DATA ---
+    order_id = order.get('order_id', 'N/A')
+    customer = order.get('customer', 'N/A')
+    item = order.get('item', 'N/A')
+    qty = order.get('qty', 'N/A')
+    
+    # Critical fields requested by the user:
+    delivery_date = order.get('due', 'TBD') # Assuming 'due' field is used as Delivery Date
+    product_description = order.get('product_type', 'N/A') # Using product_type as the main description
+    admin_notes = order.get('admin_notes', 'No special instructions.')
+    
+    # Additional Production Details
+    printing_specs = order.get('printing_specs', {})
+    paper_quality = printing_specs.get('paper_quality', 'N/A')
+    
+    # --- 2. BUILD TEXT CONTENT ---
+    
+    # Function to format time consistently
+    def now_ist_formatted():
+        return datetime.now(IST).strftime("%d %b %Y, %I:%M %p")
 
-if st.session_state["role"] not in ["lamination", "admin"]:
-    st.error("❌ You do not have permission to access this page.")
-    st.stop()
-
-st.title("🟦 Lamination Department")
-st.caption("Manage lamination process, upload files, assign operator & download job slips.")
-
-# ---------------------------------------------------
-# LOAD ORDERS
-# ---------------------------------------------------
-orders = read("orders") or {}
-
-pending = {}
-completed = {}
-
-for key, o in orders.items():
-    if not isinstance(o, dict):
-        continue
-
-    if o.get("product_type") != "Box":
-        continue  # Lamination only for Box
-
-    if o.get("stage") == "Lamination":
-        pending[key] = o
-    elif o.get("lamination_completed_at"):
-        completed[key] = o
-
-# ---------------------------------------------------
-# FILE DOWNLOAD HANDLER (Auto-detect file type)
-# ---------------------------------------------------
-def download_button(label, b64_data, order_id, fname, key_prefix):
-    if not b64_data:
-        return
-
-    raw = base64.b64decode(b64_data)
-    head = raw[:10]
-
-    if head.startswith(b"%PDF"):
-        ext, mime = ".pdf", "application/pdf"
-    elif head.startswith(b"\x89PNG"):
-        ext, mime = ".png", "image/png"
-    elif head[:3] == b"\xff\xd8\xff":
-        ext, mime = ".jpg", "image/jpeg"
-    else:
-        ext, mime = ".bin", "application/octet-stream"
-
-    st.download_button(
-        label=label,
-        data=raw,
-        file_name=f"{order_id}_{fname}{ext}",
-        mime=mime,
-        key=f"{key_prefix}_{order_id}",
-        use_container_width=True
-    )
-
-# ---------------------------------------------------
-# FILE PREVIEW
-# ---------------------------------------------------
-def preview(label, b64):
-    if not b64:
-        st.warning(f"{label} missing.")
-        return
-
-    raw = base64.b64decode(b64)
-    head = raw[:10]
-
-    st.markdown(f"#### 📄 {label} Preview")
-
-    if head.startswith(b"%PDF"):
-        st.info("PDF detected — Please download to view.")
-    else:
-        st.image(raw, use_container_width=True)
-
-# ---------------------------------------------------
-# PURE PYTHON PDF SLIP GENERATOR
-# ---------------------------------------------------
-def generate_lamination_slip(order, lam_type, material, reel, assign_to, notes):
-
-    # Build final text with multiple lines
     lines = [
-        "LAMINATION DEPARTMENT – JOB SLIP",
+        "*** FINAL DELIVERY NOTE & JOB SUMMARY ***",
         "",
-        f"Order ID: {order.get('order_id')}",
-        f"Customer: {order.get('customer')}",
-        f"Item: {order.get('item')}",
+        f"Order ID: {order_id}",
+        f"Customer: {customer}",
+        f"Item Name: {item}",
+        f"Quantity: {qty}",
         "",
-        f"Lamination Type: {lam_type}",
-        f"Material Quality: {material}",
-        f"Reel Width: {reel} inches",
-        f"Assigned To: {assign_to}",
+        "--- DELIVERY DETAILS ---",
+        f"REQUIRED DELIVERY DATE: {delivery_date}",
         "",
-        "Notes:",
-        notes or "-",
+        "--- PRODUCT DESCRIPTION & SPECS ---",
+        f"Product Type: {product_description}",
+        f"Material Used: {paper_quality}",
         "",
-        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        "--- ADMINISTRATION NOTES ---",
+        admin_notes or "No special instructions.",
+        "",
+        "",
+        "*** IMPORTANT: PLEASE CONFIRM QUANTITY UPON RECEIPT ***",
+        "",
+        f"Generated On: {now_ist_formatted()}"
     ]
+
+    # --- 3. ASSEMBLE PDF ---
 
     # Escape PDF special characters
     def esc(s):
         return s.replace("(", "\\(").replace(")", "\\)")
 
-    # Build PDF text block with each line
+    # Build PDF text block: set font, move to position (50, 750), then print lines
     pdf_text = "BT\n/F1 12 Tf\n50 750 Td\n"
-    for line in lines:
-        pdf_text += f"({esc(line)}) Tj\n0 -18 Td\n"
+    for i, line in enumerate(lines):
+        # Use bold font for titles and large font for important notes
+        if line.startswith('***') or line.startswith('---'):
+             pdf_text += "/F1 14 Tf\n" # Larger font for headers
+        else:
+             pdf_text += "/F1 12 Tf\n"
+        
+        pdf_text += f"({esc(line)}) Tj\n0 -20 Td\n" # Move down 20 units (points)
     pdf_text += "ET"
 
-    # Assemble the PDF structure
+    # Assemble the PDF structure (Unchanged boilerplate PDF code)
     pdf = f"""%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -169,164 +124,7 @@ startxref
 
     return pdf.encode("utf-8", errors="ignore")
 
-
-
-# ---------------------------------------------------
-# TABS
-# ---------------------------------------------------
-tab1, tab2 = st.tabs([
-    f"🛠 Pending Lamination ({len(pending)})",
-    f"✔ Completed Lamination ({len(completed)})"
-])
-
-# ---------------------------------------------------
-# TAB 1 — PENDING JOBS
-# ---------------------------------------------------
-with tab1:
-    if not pending:
-        st.success("🎉 No pending lamination work!")
-    
-    for key, o in pending.items():
-        order_id = o["order_id"]
-        lam_file = o.get("lamination_file")
-
-        with st.container(border=True):
-            st.subheader(f"🟦 Order {order_id}")
-            st.markdown(f"**Customer:** {o.get('customer')} — **Item:** {o.get('item')}")
-            st.divider()
-
-            # ---------------- TIME TRACKING ----------------
-            st.subheader("⏱ Time Tracking")
-
-            start = o.get("lamination_start")
-            end = o.get("lamination_end")
-
-            if not start:
-                if st.button("▶ Start Lamination", key=f"start_{order_id}", use_container_width=True):
-                    update(f"orders/{key}", {"lamination_start": datetime.now().isoformat()})
-                    st.rerun()
-
-            elif not end:
-                if st.button("⏹ End Lamination", key=f"end_{order_id}", use_container_width=True):
-                    update(f"orders/{key}", {"lamination_end": datetime.now().isoformat()})
-                    st.rerun()
-                st.info(f"Started: {start}")
-
-            else:
-                st.success("Lamination Time Completed")
-                st.caption(f"Start: {start}")
-                st.caption(f"End: {end}")
-
-            st.divider()
-
-            # ---------------- DETAILS ----------------
-            st.subheader("📋 Lamination Details")
-
-            lam_type = st.selectbox(
-                "Lamination Type", 
-                ["Gloss", "Matt", "Velvet", "Thermal", "BOPP Gloss", "BOPP Matt"],
-                key=f"type_{order_id}"
-            )
-
-            material = st.text_input(
-                "Material Quality",
-                value=o.get("lamination_material", ""),
-                placeholder="e.g., BOPP 20 Micron",
-                key=f"material_{order_id}"
-            )
-
-            reel = st.number_input(
-                "Reel Width (Inches)",
-                min_value=1, max_value=100, value=30,
-                key=f"reel_{order_id}"
-            )
-
-            assign_to = st.text_input(
-                "Assign Work To",
-                value=o.get("lamination_assigned_to", ""),
-                placeholder="e.g., Rajesh",
-                key=f"assign_{order_id}"
-            )
-
-            notes = st.text_area(
-                "Notes",
-                value=o.get("lamination_notes", ""),
-                key=f"notes_{order_id}"
-            )
-
-            if st.button("💾 Save Details", key=f"save_details_{order_id}", use_container_width=True):
-                update(f"orders/{key}", {
-                    "lamination_type": lam_type,
-                    "lamination_material": material,
-                    "lamination_reel_width": reel,
-                    "lamination_assigned_to": assign_to,
-                    "lamination_notes": notes
-                })
-                st.success("Details Saved!")
-                st.rerun()
-
-            st.divider()
-
-            # ---------------- FILE UPLOAD ----------------
-            st.subheader("📁 Upload Lamination Output")
-
-            up = st.file_uploader(
-                "Upload File",
-                type=["pdf", "png", "jpg"],
-                key=f"upl_{order_id}"
-            )
-
-            if st.button("💾 Save File", key=f"save_file_{order_id}", use_container_width=True) and up:
-                encoded = base64.b64encode(up.read()).decode()
-                update(f"orders/{key}", {"lamination_file": encoded})
-                st.success("File Uploaded!")
-                st.rerun()
-
-            if lam_file:
-                preview("Lamination File", lam_file)
-                download_button("⬇ Download", lam_file, order_id, "lamination", "dl")
-
-            st.divider()
-
-            # ---------------- PDF SLIP ----------------
-            st.subheader("📄 Download Lamination Slip")
-
-            slip_bytes = generate_lamination_slip(
-                o, lam_type, material, reel, assign_to, notes
-            )
-
-            st.download_button(
-                label="⬇ Download Lamination Slip (PDF)",
-                data=slip_bytes,
-                file_name=f"{order_id}_lamination_slip.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-
-            # ---------------- COMPLETE & MOVE TO NEXT ----------------
-            if st.button("🚀 Move to DieCut", key=f"move_{order_id}", type="primary", use_container_width=True):
-                now = datetime.now().isoformat()
-                update(f"orders/{key}", {
-                    "stage": "DieCut",
-                    "lamination_completed_at": now,
-                    "lamination_end": o.get("lamination_end") or now
-                })
-                st.success("Moved to DieCut Stage!")
-                st.balloons()
-                st.rerun()
-
-# ---------------------------------------------------
-# TAB 2 — COMPLETED JOBS
-# ---------------------------------------------------
-with tab2:
-    st.header("✔ Completed Lamination")
-
-    for key, o in completed.items():
-        with st.container(border=True):
-            st.write(f"### {o.get('order_id')} — {o.get('customer')}")
-            st.caption(f"Completed At: {o.get('lamination_completed_at')}")
-
-            if o.get("lamination_file"):
-                download_button("⬇ Download Lamination File", o["lamination_file"], o["order_id"], "lamination", "dl2")
-
-            st.markdown("---")
+# Example usage (for testing):
+# order_data = read("orders").get('some_key')
+# pdf_bytes = generate_delivery_summary_pdf(order_data)
+# st.download_button(..., data=pdf_bytes, ...)
