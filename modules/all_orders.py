@@ -5,10 +5,12 @@ from firebase import read, update, delete # Assuming 'firebase' module handles c
 from datetime import datetime, timezone
 import base64
 import io
+import json # Used for URL parameter serialization
 
 # --- CONFIGURATION ---
 DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
-FIREBASE_TIMEZONE = timezone.utc # Assuming Firebase stores UTC timestamps
+# Assuming Firebase stores UTC timestamps
+FIREBASE_TIMEZONE = timezone.utc 
 
 # ------------------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -24,14 +26,14 @@ def to_datetime_utc(x):
     if not x:
         return None
     try:
-        # Handles both standard ISO and the 'Z' format used in get_current_firebase_time_str
-        dt = datetime.fromisoformat(x.replace('Z', '+00:00'))
-        # Ensure it's timezone-aware (it should be if fromisoformat handles the timezone info)
-        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-            # Fallback for naive timestamps, treat as UTC
+        # Handles both standard ISO and the 'Z' format
+        dt = datetime.fromisoformat(str(x).replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            # Assume naive timestamp is UTC if it came from Firebase
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
+        # Handle cases where conversion fails, returning None
         return None
 
 def format_display_date(dt_utc):
@@ -39,17 +41,52 @@ def format_display_date(dt_utc):
     if dt_utc is None:
         return "N/A"
     try:
-        # Convert to local timezone for display (Streamlit usually runs on a server)
-        # Using a fixed format for clarity
         return dt_utc.astimezone().strftime(DATE_FORMAT)
     except Exception:
         return str(dt_utc)
 
+# Function to safely convert and handle dates for display in Data Editor
+def format_df_date_display(d):
+    try:
+        # For the Data Editor, we want a simple string format
+        dt = to_datetime_utc(d)
+        return dt.strftime("%Y-%m-%d") if dt else "N/A"
+    except:
+        return str(d)
+
+# ------------------------------------------------------------------------------------
+# STICKY FILTER LOGIC (Query Params)
+# ------------------------------------------------------------------------------------
+
+def get_sticky_filter_state(key, default_value):
+    """Reads filter state from URL or returns default, handling JSON decoding."""
+    try:
+        param = st.query_params.get(key)
+        if param:
+            # Attempt to decode JSON string if it's complex (e.g., list/dict)
+            return json.loads(param)
+        return param or default_value
+    except json.JSONDecodeError:
+        return param or default_value
+    except Exception:
+        return default_value # Fallback
+
+def set_sticky_filter_state(key, value):
+    """Saves filter state to URL, encoding complex objects as JSON."""
+    try:
+        # Only update if value is different to avoid infinite reruns
+        current_value = st.query_params.get(key)
+        new_value = json.dumps(value) if isinstance(value, (list, dict)) else str(value)
+        
+        if current_value != new_value:
+            st.query_params[key] = new_value
+    except Exception as e:
+        st.error(f"Error saving filter state for {key}: {e}")
 
 # ------------------------------------------------------------------------------------
 # ADMIN ACCESS & PAGE SETUP
 # ------------------------------------------------------------------------------------
-st.set_page_config(page_title="🔥 Advanced Orders Admin Panel", layout="wide")
+st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide")
 
 if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.error("❌ Access Denied — Admin Only")
@@ -76,7 +113,7 @@ def load_and_process_orders():
     df = pd.DataFrame(data)
 
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), {}, []
 
     # Define the production stages in order
     production_stages = [
@@ -86,7 +123,7 @@ def load_and_process_orders():
 
     # Map stage to the completion timestamp field
     stage_times = {
-        "Received": "received", # Use 'received' as the starting point
+        "Received": "received", 
         "Design": "design_completed_at",
         "Printing": "printing_completed_at",
         "Lamination": "lamination_completed_at",
@@ -94,37 +131,33 @@ def load_and_process_orders():
         "Assembly": "assembly_completed_at",
         "Storage": "storage_completed_at",
         "Dispatch": "dispatch_completed_at",
-        "Completed": "dispatch_completed_at", # Assuming final completion is dispatch
+        "Completed": "dispatch_completed_at", 
     }
 
     # Data Quality: Convert all time fields to UTC datetime objects
     for key in stage_times.values():
         if key in df.columns:
+            # Suppress errors by using .apply() to handle individual cell errors
             df[key] = df[key].apply(to_datetime_utc)
 
-    # Calculate Time-In-Stage (Advanced Metric)
-    df["time_in_stage_sec"] = None
+    # Prepare columns for the data_editor (must be non-datetime/non-object for editing)
+    df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
+    df["Due_Date"] = df.get('due', pd.Series()).apply(format_df_date_display)
+    
+    # Calculate Time-In-Stage (Advanced Metric) - **FIXED ERROR HERE**
+    # Use .diff() on sorted columns where possible to ensure correct datetime operations
+    
+    # Create the duration columns
     for i in range(1, len(production_stages)):
-        current_stage = production_stages[i]
         prev_stage = production_stages[i-1]
         
-        # Determine the columns for start and end time
-        end_col = stage_times.get(current_stage)
         start_col = stage_times.get(prev_stage)
-        
-        if end_col and start_col and end_col in df.columns and start_col in df.columns:
-            # Calculate duration for orders that are currently in the *current_stage*
-            # This is complex, so for simplicity, we calculate the time *to complete* the previous stage,
-            # using the timestamp difference.
-            duration = (df[end_col] - df[start_col]).dt.total_seconds()
-            
-            # Apply to orders that have both timestamps and are at or past the current stage
-            mask = df[end_col].notna() & df[start_col].notna()
-            df.loc[mask, f"{prev_stage}_duration_hours"] = duration / 3600
-            
-    # Add display columns for better table view
-    df["Received_Display"] = df["received"].apply(lambda x: x.strftime("%d/%m/%Y") if x else "N/A")
-    df["Due_Display"] = df["due"].apply(lambda x: x.strftime("%d/%m/%Y") if x else "N/A")
+        end_col = stage_times.get(production_stages[i])
+
+        if start_col in df.columns and end_col in df.columns:
+            # Calculate duration only where both start and end times are valid datetime objects
+            duration = (df[end_col] - df[start_col]).dt.total_seconds().fillna(0)
+            df[f"{prev_stage}_duration_hours"] = (duration / 3600).round(2)
 
 
     return df, stage_times, production_stages
@@ -135,7 +168,7 @@ df, stage_times, production_stages = load_and_process_orders()
 if df.empty:
     st.warning("No orders found in the system.")
     st.stop()
-
+    
 # ------------------------------------------------------------------------------------
 # KPI Cards
 # ------------------------------------------------------------------------------------
@@ -145,45 +178,40 @@ col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Orders", len(df))
 col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
 col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
-            delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total")
+            delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
 col4.metric("Orders This Month", 
-            len(df[df["received"].astype(str).str[:7] == datetime.now().strftime("%Y-%m")]))
-col5.metric("Avg Order Qty", f"{df['qty'].mean():.0f}" if 'qty' in df else "N/A")
+            len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]))
+col5.metric("Avg Order Qty", f"{df['Qty'].mean():.0f}" if 'Qty' in df else "N/A")
 
 st.markdown("---")
 
 # ------------------------------------------------------------------------------------
-# SEARCH & FILTERS
+# STICKY FILTERS (No search here, search is now in the data_editor)
 # ------------------------------------------------------------------------------------
-st.markdown("## 🔍 Order Search and Filtering")
+st.markdown("## 🔍 Order Filtering")
 with st.expander("Filter Options"):
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
 
-    search = c1.text_input("Search Order ID / Customer Name / Phone", key="search_input")
+    # 2. Sticky Filters: Read from URL
+    default_stage = get_sticky_filter_state("stage", "All")
+    default_priority = get_sticky_filter_state("priority", "All")
     
-    # Use the full defined stage list for filtering
-    stage_filter = c2.selectbox(
+    stage_filter = c1.selectbox(
         "Filter by Production Stage",
         ["All"] + production_stages,
-        key="stage_filter_select"
+        index=(["All"] + production_stages).index(default_stage) if default_stage in (["All"] + production_stages) else 0,
+        key="stage_filter_select",
+        on_change=lambda: set_sticky_filter_state("stage", st.session_state.stage_filter_select)
     )
-    priority_filter = c3.selectbox(
+    priority_filter = c2.selectbox(
         "Filter by Priority",
         ["All", "High", "Medium", "Low"],
-        key="priority_filter_select"
+        index=(["All", "High", "Medium", "Low"]).index(default_priority) if default_priority in (["All", "High", "Medium", "Low"]) else 0,
+        key="priority_filter_select",
+        on_change=lambda: set_sticky_filter_state("priority", st.session_state.priority_filter_select)
     )
 
 df_filtered = df.copy()
-
-if search:
-    # Use .str.contains for better, case-insensitive search across key columns
-    search_cols = ["order_id", "customer", "customer_phone"]
-    df_filtered = df_filtered[
-        df_filtered[search_cols].astype(str).apply(
-            lambda row: row.str.contains(search, case=False, na=False).any(), axis=1
-        )
-    ]
-
 
 if stage_filter != "All":
     df_filtered = df_filtered[df_filtered["stage"] == stage_filter]
@@ -193,30 +221,88 @@ if priority_filter != "All":
 
 
 # ------------------------------------------------------------------------------------
-# TABLE VIEW & ACTIONS
+# TABLE VIEW (Data Editor) & INLINE EDITING
 # ------------------------------------------------------------------------------------
-st.markdown("## 📋 Filtered Orders Table")
+st.markdown("## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)")
 
 df_display = df_filtered[[
-    "order_id", "customer", "customer_phone", "item", "qty",
-    "stage", "priority", "Received_Display", "Due_Display", "firebase_id"
+    "order_id", "customer", "customer_phone", "item", "Qty", # Qty for editing
+    "stage", "priority", "Due_Date", "firebase_id" # Due_Date for editing
 ]].rename(columns={
-    "Received_Display": "Received Date",
-    "Due_Display": "Due Date",
-    "customer_phone": "Phone"
+    "customer_phone": "Phone",
+    "order_id": "Order ID",
+    "customer": "Customer",
+    "item": "Item",
+    "stage": "Stage",
+    "priority": "Priority",
+    "firebase_id": "Firebase ID"
 })
 
-st.dataframe(
+# Define the data editor configuration for inline editing
+column_config = {
+    "Order ID": st.column_config.TextColumn("Order ID", disabled=True),
+    "Customer": st.column_config.TextColumn("Customer Name", required=True),
+    "Phone": st.column_config.TextColumn("Customer Phone"),
+    "Item": st.column_config.TextColumn("Item / Product", disabled=True),
+    "Qty": st.column_config.NumberColumn("Qty", required=True, min_value=1),
+    "Stage": st.column_config.TextColumn("Stage", disabled=True),
+    "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
+    "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True),
+    "Firebase ID": st.column_config.Column("Firebase ID", disabled=True, visible=False)
+}
+
+# 1, 4, 5: Inline Editing, Instant Search, Column Sorting, Pagination
+edited_df = st.data_editor(
     df_display,
+    column_config=column_config,
+    hide_index=True,
     use_container_width=True,
-    column_config={
-        "firebase_id": st.column_config.Column(
-            "ID (FBase)", help="Firebase unique ID.", visible=False
-        )
-    }
+    num_rows="dynamic", # For future row adding capability
+    key="orders_data_editor"
 )
 
-colA, colB, colC = st.columns([1, 1, 3])
+# 3. Inline Editing: Check for changes and update Firebase
+if st.session_state.orders_data_editor['edited_rows']:
+    st.info("🚨 Changes detected in the table. Click 'Apply Changes' to save them to Firebase.")
+    
+    # Process only the edited rows
+    edited_rows = st.session_state.orders_data_editor['edited_rows']
+    
+    for index, edits in edited_rows.items():
+        original_firebase_id = df_filtered.iloc[index]['firebase_id']
+        update_data = {}
+        
+        # Map edited column names back to Firebase keys
+        if 'Customer' in edits:
+            update_data['customer'] = edits['Customer']
+        if 'Phone' in edits:
+            update_data['customer_phone'] = edits['Phone']
+        if 'Qty' in edits:
+            update_data['qty'] = int(edits['Qty'])
+        if 'Priority' in edits:
+            update_data['priority'] = edits['Priority']
+        if 'Due_Date' in edits:
+            # Convert YYYY-MM-DD back to ISO format for Firebase storage
+            try:
+                dt_obj = datetime.strptime(edits['Due_Date'], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
+            except ValueError:
+                st.error(f"Invalid date format for order {df_filtered.iloc[index]['order_id']}. Date not updated.")
+                continue
+
+        if update_data:
+            update(f"orders/{original_firebase_id}", update_data)
+            st.toast(f"✅ Updated Order ID: {df_filtered.iloc[index]['order_id']}", icon='💾')
+
+    # Force a rerun to reload data with new values and clear the editor state
+    st.session_state.orders_data_editor['edited_rows'] = {} # Clear state manually
+    st.cache_data.clear()
+    st.rerun()
+
+# ------------------------------------------------------------------------------------
+# ACTIONS: EXPORT / DELETE ALL
+# ------------------------------------------------------------------------------------
+colA, colB = st.columns(2)
 
 csv_export = df_filtered.to_csv(index=False).encode()
 colA.download_button(
@@ -240,224 +326,23 @@ if colB.button("🗑️ Delete ALL Orders", type="secondary"):
 st.markdown("---")
 
 # ------------------------------------------------------------------------------------
-# PER-ORDER DETAILS, EDITING & STAGE UPDATE (Advanced Feature)
+# ANALYTICS SECTION (Simplified to avoid re-running complex logic after every edit)
 # ------------------------------------------------------------------------------------
-st.markdown("## 🛠️ Per-Order Management")
-
-selected_order_id = st.selectbox(
-    "Select Order ID for Detailed View and Management",
-    ["Select"] + df_filtered["order_id"].tolist(),
-    key="selected_order_for_detail"
-)
-
-if selected_order_id != "Select":
-    order_data = df[df["order_id"] == selected_order_id].iloc[0]
-    firebase_id = order_data['firebase_id']
-
-    st.markdown(f"### 🧾 Order: **{order_data['order_id']}** (Firebase ID: `{firebase_id}`)")
-    
-    col_det1, col_det2, col_edit = st.columns([1, 1, 1.5])
-
-    # --- Static Details ---
-    with col_det1:
-        st.markdown("**Core Details**")
-        st.write(f"**Item:** {order_data['item']}")
-        st.write(f"**Qty:** {order_data['qty']}")
-        st.write(f"**Received:** {format_display_date(order_data.get('received'))}")
-        st.write(f"**Due Date:** {format_display_date(to_datetime_utc(order_data.get('due')))}")
-    
-    # --- Edit Form ---
-    with col_edit:
-        st.markdown("**Order Update**")
-        with st.form("edit_order_form", clear_on_submit=False):
-            # Editable Fields
-            new_customer = st.text_input("Customer Name", order_data.get('customer', ''), key="edit_cust")
-            new_phone = st.text_input("Phone", order_data.get('customer_phone', ''), key="edit_phone")
-            new_priority = st.selectbox("Priority", ["High", "Medium", "Low"], 
-                                        index=["High", "Medium", "Low"].index(order_data.get('priority', 'Medium')), key="edit_priority")
-
-            # Stage Update Control (The most advanced feature here)
-            current_stage_index = production_stages.index(order_data.get('stage', 'Received'))
-            new_stage = st.selectbox("Update Production Stage", production_stages, 
-                                     index=current_stage_index, key="edit_stage")
-
-            submit_button = st.form_submit_button("💾 Save Updates and Stage")
-
-            if submit_button:
-                update_data = {
-                    "customer": new_customer,
-                    "customer_phone": new_phone,
-                    "priority": new_priority,
-                }
-                
-                # Logic for stage update and timestamp recording
-                if new_stage != order_data.get('stage'):
-                    # Update the stage
-                    update_data["stage"] = new_stage
-                    
-                    # Record the completion timestamp if it's a defined completed stage
-                    completion_field = stage_times.get(new_stage)
-                    if completion_field and completion_field != "received" and completion_field not in order_data or order_data.get(completion_field) is None:
-                         # Only set time if it doesn't exist already
-                         update_data[completion_field] = get_current_firebase_time_str()
-                         st.success(f"Stage updated to **{new_stage}** and completion time recorded.")
-                    else:
-                         st.success(f"Stage updated to **{new_stage}**.")
-
-                # Update data in Firebase
-                update(f"orders/{firebase_id}", update_data)
-                st.cache_data.clear()
-                st.rerun()
-
-
-    # --- QR Code & Delete Button ---
-    with col_det2:
-        st.markdown("**QR Code & Management**")
-        if order_data.get("order_qr"):
-            try:
-                raw_qr = base64.b64decode(order_data["order_qr"])
-                st.image(raw_qr, caption="Order QR Code", width=180)
-            except Exception:
-                st.error("Could not decode QR image.")
-        else:
-            st.warning("No QR Code available.")
-
-        # Delete Button (must be outside the form)
-        if st.button("🗑️ Delete This Order", key="delete_single_order_btn"):
-            delete(f"orders/{firebase_id}")
-            st.success(f"Order {selected_order_id} deleted.")
-            st.cache_data.clear()
-            st.rerun()
-
-
-    # --- Timeline Chart ---
-    st.markdown("### 🕒 Production Timeline")
-    tl_data = []
-    
-    # Calculate time-in-stage for this specific order
-    for i in range(1, len(production_stages)):
-        current_stage_name = production_stages[i]
-        prev_stage_name = production_stages[i-1]
-        
-        end_time_col = stage_times.get(current_stage_name)
-        start_time_col = stage_times.get(prev_stage_name)
-
-        start_time = order_data.get(start_time_col)
-        end_time = order_data.get(end_time_col)
-
-        # Record completion time for timeline visualization
-        if end_time:
-            tl_data.append({"Event": f"{current_stage_name} Completed", "Time": end_time})
-        
-        # Record Time-in-Stage
-        if start_time and end_time:
-             duration_seconds = (end_time - start_time).total_seconds()
-             tl_data.append({
-                 "Event": f"Time in {prev_stage_name}", 
-                 "Time": start_time + (end_time - start_time)/2, # Use midpoint for better display
-                 "Duration_Hours": duration_seconds / 3600
-             })
-
-    if tl_data:
-        df_tl = pd.DataFrame(tl_data).sort_values("Time")
-        
-        fig_tl = px.timeline(
-            df_tl.dropna(subset=['Duration_Hours']), # Use only duration bars for Gantt-like view
-            x_start=df_tl.dropna(subset=['Duration_Hours'])["Time"] - pd.to_timedelta(df_tl.dropna(subset=['Duration_Hours'])['Duration_Hours'], unit='h') / 2, # Calculate start time
-            x_end=df_tl.dropna(subset=['Duration_Hours'])["Time"] + pd.to_timedelta(df_tl.dropna(subset=['Duration_Hours'])['Duration_Hours'], unit='h') / 2, # Calculate end time
-            y="Event",
-            color="Event",
-            title=f"Order Production Flow (ID: {order_data['order_id']})",
-            height=400,
-        )
-        # Add completion point markers
-        fig_tl.add_scatter(
-            x=df_tl["Time"], 
-            y=df_tl["Event"], 
-            mode='markers', 
-            name='Completion Point',
-            marker=dict(symbol='circle-open', size=10, color='black'),
-            showlegend=False
-        )
-
-        st.plotly_chart(fig_tl, use_container_width=True)
-    else:
-        st.info("No production timeline data recorded yet.")
-
-st.markdown("---")
-
-# ------------------------------------------------------------------------------------
-# ADVANCED ANALYTICS SECTION
-# ------------------------------------------------------------------------------------
-st.markdown("## 📈 Advanced Analytics Dashboard")
-
-# Row 1: Production Flow & Distribution
-col_an1, col_an2 = st.columns(2)
+st.subheader("📈 Analytics Dashboard")
 
 # Order Status Distribution (Pie Chart)
-with col_an1:
-    st.markdown("### 🟢 Order Status Distribution")
-    fig_stage = px.pie(
-        df,
-        names="stage",
-        title="Current Production Stage Breakdown",
-        hole=.3
-    )
-    st.plotly_chart(fig_stage, use_container_width=True)
+fig_stage = px.pie(
+    df,
+    names="stage",
+    title="Current Production Stage Breakdown",
+    hole=.3
+)
+st.plotly_chart(fig_stage, use_container_width=True)
 
-# Monthly production
-with col_an2:
-    st.markdown("### 🗓️ Monthly Orders Volume")
-    df["received_month"] = df["received"].dt.to_period("M").astype(str)
-    
-    fig_m = px.bar(
-        df.groupby("received_month").size().reset_index(name="count"),
-        x="received_month",
-        y="count",
-        title="Orders Received by Month",
-        labels={"received_month": "Month", "count": "Order Count"},
-        color="count",
-    )
-    st.plotly_chart(fig_m, use_container_width=True)
-
-# Row 2: Weekly Trend & Product Type
-col_an3, col_an4 = st.columns(2)
-
-# Weekly Production Trend
-with col_an3:
-    st.markdown("### 🗓️ Weekly Production Trend")
-    # Using the date component of the received time
-    df["received_date"] = df["received"].dt.date
-    df_weekly = df.groupby("received_date").size().reset_index(name="count")
-    
-    fig_w = px.line(
-        df_weekly,
-        x="received_date",
-        y="count",
-        title="Daily Order Volume Trend",
-        labels={"received_date": "Date", "count": "Order Count"},
-        markers=True
-    )
-    st.plotly_chart(fig_w, use_container_width=True)
-
-# Product type pie chart
-with col_an4:
-    if "product_type" in df:
-        st.markdown("### 📦 Product Type Distribution")
-        fig_p = px.pie(
-            df,
-            names="product_type",
-            title="Product Type Distribution",
-            hole=.4
-        )
-        st.plotly_chart(fig_p, use_container_width=True)
-    else:
-        st.info("Product Type distribution is not available (missing 'product_type' column).")
-
-# Row 3: Department Time Analysis (Advanced - Bottleneck Identification)
+# Time Consumption by Department - **Error Fix Applied**
 st.markdown("### ⏱️ Bottleneck Analysis: Average Time to Complete Stage (Hours)")
 
-# Calculate the average duration for each completion column
+# Filter for duration columns (created in the load function)
 stage_duration_cols = [c for c in df.columns if c.endswith('_duration_hours')]
 
 if stage_duration_cols:
@@ -469,15 +354,16 @@ if stage_duration_cols:
     # Clean up column names for display
     dept_times_avg["Department"] = dept_times_avg["Duration_Column"].str.replace('_duration_hours', '')
 
-    df_d = dept_times_avg.dropna()
+    # Filter out stages with 0 or NaN average time
+    df_d = dept_times_avg[dept_times_avg["AvgHours"] > 0].dropna() 
 
     if not df_d.empty:
         fig_d = px.bar(
-            df_d.sort_values("AvgHours", ascending=False), # Sort to clearly show bottlenecks
+            df_d.sort_values("AvgHours", ascending=False), 
             x="Department",
             y="AvgHours",
             title="Average Stage Completion Time (Hours)",
-            color="AvgHours", # Color by time
+            color="AvgHours", 
             color_continuous_scale=px.colors.sequential.Sunset,
         )
         st.plotly_chart(fig_d, use_container_width=True)
@@ -488,11 +374,6 @@ if stage_duration_cols:
         st.error(f"⚠️ **Identified Bottleneck (Slowest):** **{slowest['Department']}** ({slowest['AvgHours']:.2f} hrs)")
         st.success(f"⚡ **Most Efficient Stage (Fastest):** **{fastest['Department']}** ({fastest['AvgHours']:.2f} hrs)")
     else:
-        st.warning("Not enough data to calculate stage completion times.")
+        st.warning("Not enough complete stage data (or zero duration) to calculate stage completion times.")
 else:
     st.warning("No stage duration data available (Are timestamps recorded?).")
-
-st.markdown("---")
-
-# Offer a next step
-st.markdown("Need to analyze a specific bottleneck? **Select a stage in the filter above** to examine only the orders currently stuck there.")
