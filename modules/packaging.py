@@ -362,43 +362,4 @@ with tab4:
                     dl_qr(qr_raw)
             else:
                 st.warning("QR not available for this order.")
-# ============================================================
-# 🏬 LIVE STORAGE INVENTORY (NEW FEATURE)
-# ============================================================
 
-st.subheader("🏬 Products Currently in Storage")
-
-# Filter storage orders
-storage_orders = {
-    k: o for k, o in orders.items()
-    if isinstance(o, dict) and o.get("stage") == "Storage"
-}
-
-if len(storage_orders) == 0:
-    st.success("🎉 No items currently in storage.")
-else:
-    storage_list = []
-
-    for key, o in storage_orders.items():
-        started = safe_iso_to_dt(o.get("storage_started_at"))
-        time_in_storage = "N/A"
-
-        if started:
-            diff = datetime.now(timezone.utc) - started
-            time_in_storage = str(diff).split(".")[0]
-
-        storage_list.append({
-            "Order ID": o.get("order_id", key),
-            "Item": o.get("item", "N/A"),
-            "Quantity": o.get("qty", "N/A"),
-            "Priority": o.get("priority", "N/A"),
-            "Time in Storage": time_in_storage
-        })
-
-    df_storage = pd.DataFrame(storage_list)
-
-    st.dataframe(
-        df_storage,
-        use_container_width=True,
-        hide_index=True
-    )
