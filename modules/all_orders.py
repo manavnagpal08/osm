@@ -1,878 +1,258 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
-# Assuming 'firebase' module exists and has 'read', 'delete', and 'write' functions
-from firebase import read, delete 
-from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, Optional, List
+import plotly.express as px
+from firebase import read, update, delete
+from datetime import datetime, timezone
+import base64
+import io
 
-# --- STREAMLIT CONFIG ---
-st.set_page_config(page_title="Admin Order Overview", page_icon="📋", layout="wide")
+# ------------------------------------------------------------------------------------
+# ADMIN ACCESS
+# ------------------------------------------------------------------------------------
+st.set_page_config(page_title="All Orders Admin Panel", layout="wide")
 
-# -------------------------------------
-# ROLE CHECK & PAGE SETUP
-# -------------------------------------
-if "role" not in st.session_state:
-    # This assumes 'pages/login.py' is a valid path in your Streamlit app structure
-    st.switch_page("pages/login.py")
-
-if st.session_state["role"] != "admin":
-    st.error("❌ Only admin can view this page.")
+if "role" not in st.session_state or st.session_state["role"] != "admin":
+    st.error("❌ Access Denied — Admin Only")
     st.stop()
 
-st.title("📋 All Orders Overview Dashboard (Executive Production Analytics)")
-st.write("Deep dive into production efficiency, performance against targets, and data quality.")
+st.title("📊 Admin — All Orders Manager & Analytics")
 
-# -------------------------------------
-# CONFIGURATION
-# -------------------------------------
-# Target KPI for comparison
-ON_TIME_RATE_TARGET = 85.0
-DATA_QUALITY_TARGET = 95.0
+# ------------------------------------------------------------------------------------
+# LOAD ORDERS
+# ------------------------------------------------------------------------------------
+orders = read("orders") or {}
 
-# Define all possible production stages with their start/end keys
-PRODUCTION_STAGES = [
-    ('Design', 'started_at', 'design_completed_at'),
-    ('Printing', 'printing_started_at', 'printing_completed_at'),
-    ('DieCut', 'diecut_started_at', 'diecut_completed_at'),
-    ('Assembly', 'assembly_started_at', 'assembly_completed_at'),
-    ('Packing', 'packing_start', 'packing_completed_at'),
-]
-# Critical keys for Data Quality check
-CRITICAL_DATA_KEYS = ['received', 'due', 'customer', 'qty', 'item', 'product_type', 'priority']
+data = []
+for key, o in orders.items():
+    if isinstance(o, dict):
+        o["firebase_id"] = key
+        data.append(o)
 
-# -------------------------------------
-# UTILITY FUNCTIONS (Enhanced & Cached)
-# -------------------------------------
+df = pd.DataFrame(data)
 
-@st.cache_data(ttl=600)
-def format_seconds_to_hms(seconds: float) -> str:
-    """Converts a duration in seconds to a H:M:S string format."""
-    return str(timedelta(seconds=seconds)).split('.')[0]
+if df.empty:
+    st.warning("No orders found in the system.")
+    st.stop()
 
-@st.cache_data(ttl=600)
-def get_stage_seconds(order: Dict[str, Any], start_key: str, end_key: str) -> Optional[float]:
-    """Safely calculates duration in seconds between two ISO timestamps."""
-    start = order.get(start_key)
-    end = order.get(end_key)
-    if start and end:
-        try:
-            t1 = datetime.fromisoformat(start)
-            t2 = datetime.fromisoformat(end)
-            return (t2 - t1).total_seconds()
-        except:
-            return None
-    return None
-
-def calculate_stage_duration(start_time: Optional[str], end_time: Optional[str]) -> str:
-    """Calculates the duration between two ISO format timestamps and returns H:M:S."""
-    if start_time and end_time:
-        try:
-            # We call get_stage_seconds with a mock order dict to leverage the cache
-            diff_seconds = get_stage_seconds({'start': start_time, 'end': end_time}, 'start', 'end')
-            if diff_seconds is not None:
-                return f"**{format_seconds_to_hms(diff_seconds)}**"
-        except:
-            return "N/A (Time Error)"
-    return "In Progress"
-
-def get_completion_info(stage: str) -> Tuple[float, str]:
-    """Returns progress percentage and status color based on stage."""
-    stages = ["Design", "Printing", "DieCut", "Assembly", "Packing", "Dispatch", "Completed"]
-    if stage == 'Completed':
-        return 1.0, "green"
+# Convert timestamps if available
+def to_dt(x):
     try:
-        index = stages.index(stage)
-        progress = (index + 0.5) / len(stages) 
-        color = "blue"
-        if stage in ["Packing", "Dispatch"]:
-            color = "orange"
-        return progress, color
-    except ValueError:
-        return 0.05, "gray"
+        return datetime.fromisoformat(x) if x else None
+    except:
+        return None
 
-@st.cache_data(ttl=600) # Crucial: Cache the expensive KPI calculation
-def analyze_kpis(data_list: List[Dict[str, Any]]):
-    """
-    Calculates key production metrics, including Cycle Time, On-Time Rate,
-    Avg Stage Times, and Data Quality for a given list of orders.
-    """
-    total_cycle_time_seconds = 0
-    on_time_count = 0
-    
-    stage_time_totals = {stage[0]: 0.0 for stage in PRODUCTION_STAGES}
-    stage_time_counts = {stage[0]: 0 for stage in PRODUCTION_STAGES}
-    stage_performance = {stage[0]: {'fastest': (float('inf'), None), 'slowest': (0.0, None)} for stage in PRODUCTION_STAGES}
+stage_times = {
+    "Design": "design_completed_at",
+    "Printing": "printing_completed_at",
+    "Lamination": "lamination_completed_at",
+    "DieCut": "diecut_completed_at",
+    "Assembly": "assembly_completed_at",
+    "Storage": "storage_completed_at",
+    "Dispatch": "dispatch_completed_at",
+}
 
-    completed_orders = [o for o in data_list if o.get('stage') == 'Completed']
-    completed_count = len(completed_orders)
-    
-    # Data quality tracking per key
-    data_quality_breakdown = {key: 0 for key in CRITICAL_DATA_KEYS}
-    
-    total_orders = len(data_list)
-    orders_with_missing_data = 0
-    
-    for order in data_list:
-        order_id = order.get('order_id', 'Unknown')
-        
-        # Data Quality Check
-        has_missing = False
-        for k in CRITICAL_DATA_KEYS:
-            # Only count missing data if the order is active or completed (not just an empty stub)
-            if order.get('received') and not order.get(k):
-                data_quality_breakdown[k] += 1
-                has_missing = True
-        if has_missing and order.get('received'):
-            orders_with_missing_data += 1
+# ------------------------------------------------------------------------------------
+# KPI Cards
+# ------------------------------------------------------------------------------------
+col1, col2, col3, col4 = st.columns(4)
 
-        if order.get('stage') == 'Completed':
-            # 1. Total Cycle Time & On-Time Check (Only for completed orders)
-            received_str = order.get('received')
-            completed_str = order.get('dispatched_at') or order.get('packing_completed_at')
-            due_str = order.get('due')
+col1.metric("Total Orders", len(df))
+col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
+col3.metric("Active Orders", len(df[df["stage"] != "Completed"]))
+col4.metric("Orders This Month", len(df[df["received"].astype(str).str[:7] ==
+                                      datetime.now().strftime("%Y-%m")]))
 
-            if received_str and completed_str:
-                try:
-                    received_dt = datetime.fromisoformat(received_str)
-                    completed_dt = datetime.fromisoformat(completed_str)
-                    cycle_time_seconds = (completed_dt - received_dt).total_seconds()
-                    total_cycle_time_seconds += cycle_time_seconds
-                    
-                    if due_str:
-                        due_dt = datetime.fromisoformat(due_str)
-                        if completed_dt <= due_dt:
-                            on_time_count += 1
-                except:
-                    pass 
-            
-            # 2. Individual Stage Times & Performance Tracking
-            for stage, start_key, end_key in PRODUCTION_STAGES:
-                s = get_stage_seconds(order, start_key, end_key)
-                if s is not None:
-                    stage_time_totals[stage] += s
-                    stage_time_counts[stage] += 1
-                    
-                    # Track fastest/slowest
-                    if s < stage_performance[stage]['fastest'][0]:
-                        stage_performance[stage]['fastest'] = (s, order_id)
-                    if s > stage_performance[stage]['slowest'][0]:
-                        stage_performance[stage]['slowest'] = (s, order_id)
+# ------------------------------------------------------------------------------------
+# SEARCH & FILTERS
+# ------------------------------------------------------------------------------------
+with st.expander("🔍 Filters"):
+    c1, c2, c3 = st.columns(3)
 
-    if completed_count > 0:
-        avg_cycle_time_seconds = total_cycle_time_seconds / completed_count
-        avg_cycle_time = format_seconds_to_hms(avg_cycle_time_seconds)
-        on_time_rate = (on_time_count / completed_count) * 100
-        
-        avg_stage_times = {}
-        for stage, total_s in stage_time_totals.items():
-            count = stage_time_counts[stage]
-            if count > 0:
-                avg_stage_times[stage] = format_seconds_to_hms(total_s / count)
-            else:
-                avg_stage_times[stage] = "N/A"
-    else:
-        avg_cycle_time = "N/A"
-        on_time_rate = 0.0
-        avg_stage_times = {}
-        
-    data_quality_score = (1 - (orders_with_missing_data / total_orders)) * 100 if total_orders > 0 else 0.0
+    search = c1.text_input("Search Order / Customer / Phone")
+    stage_filter = c2.selectbox(
+        "Filter by Stage",
+        ["All"] + sorted(df["stage"].unique().tolist())
+    )
+    priority_filter = c3.selectbox(
+        "Filter by Priority",
+        ["All", "High", "Medium", "Low"]
+    )
 
-    return {
-        "completed_count": completed_count,
-        "completed_orders": completed_orders,
-        "on_time_count": on_time_count,
-        "avg_cycle_time": avg_cycle_time,
-        "on_time_rate": on_time_rate,
-        "avg_stage_times": avg_stage_times,
-        "stage_time_totals": stage_time_totals,
-        "stage_time_counts": stage_time_counts,
-        "stage_performance": stage_performance,
-        "data_quality_score": data_quality_score,
-        "data_quality_breakdown": data_quality_breakdown,
-        "total_orders": total_orders
-    }
+df_filtered = df.copy()
 
-@st.cache_data(ttl=600)
-def analyze_wip(data_list: List[Dict[str, Any]]):
-    """Calculates total quantity and count for orders currently in progress (WIP), excluding Completed/Dispatch."""
-    wip_inventory = {}
-    # Orders that are not finished
-    wip_orders = [
-        o for o in data_list 
-        if o.get('stage') not in ['Completed', 'Dispatch'] and o.get('received') is not None
+if search:
+    df_filtered = df_filtered[
+        df_filtered.apply(
+            lambda r: search.lower() in str(r).lower(), axis=1
+        )
     ]
 
-    for order in wip_orders:
-        product_type = order.get('product_type', 'Unknown')
-        try:
-            # Use 'qty' field, converting to int if possible
-            qty = int(order.get('qty', 0))
-        except (ValueError, TypeError):
-            qty = 0 # Handle non-integer quantities gracefully
+if stage_filter != "All":
+    df_filtered = df_filtered[df_filtered["stage"] == stage_filter]
 
-        if product_type not in wip_inventory:
-            wip_inventory[product_type] = {'total_qty': 0, 'order_count': 0}
-        
-        wip_inventory[product_type]['total_qty'] += qty
-        wip_inventory[product_type]['order_count'] += 1
-        
-    return wip_inventory, len(wip_orders)
+if priority_filter != "All":
+    df_filtered = df_filtered[df_filtered["priority"] == priority_filter]
 
-# -------------------------------------
-# FETCH & PRE-ANALYZE ORDERS
-# -------------------------------------
-@st.cache_data(ttl=600)
-def fetch_and_analyze_data():
-    """Fetches data and runs the initial, cached KPI analysis."""
-    orders: Dict[str, Any] = read("orders") or {}
-    if not orders or not isinstance(orders, dict):
-        return None, None, 0, None
-    
-    all_orders_list = list(orders.values())
-    overall_kpis = analyze_kpis(all_orders_list)
-    wip_inventory, total_wip_orders = analyze_wip(all_orders_list)
-    return orders, all_orders_list, overall_kpis, (wip_inventory, total_wip_orders)
+# ------------------------------------------------------------------------------------
+# TABLE VIEW
+# ------------------------------------------------------------------------------------
+st.subheader("📄 All Orders")
 
-# -------------------------------------
-# DELETE HANDLER
-# -------------------------------------
-
-def delete_single_order(order_key: str):
-    """Handles the deletion of a single order and updates the state/cache."""
-    
+def format_date(d):
     try:
-        # Assuming 'delete' function takes collection name and document key
-        delete("orders", order_key)
-        
-        # Simulate successful deletion by clearing the cache
-        st.cache_data.clear()
-        st.success(f"✅ Order **{order_key}** successfully deleted. Refreshing dashboard.")
-        st.rerun() # Rerun to fetch new data after cache clear
-    except Exception as e:
-        st.error(f"❌ Failed to delete order {order_key}: {e}")
+        return datetime.fromisoformat(d).strftime("%d/%m/%Y")
+    except:
+        return d
 
-# -------------------------------------
-# INITIAL DATA LOAD
-# -------------------------------------
+df_show = df_filtered.copy()
+if "received" in df_show:
+    df_show["received"] = df_show["received"].apply(format_date)
+if "due" in df_show:
+    df_show["due"] = df_show["due"].apply(format_date)
 
-orders, all_orders_list, overall_kpis, wip_data = fetch_and_analyze_data()
-
-if not orders:
-    st.warning("No orders found or data fetching failed.")
-    st.stop()
-
-wip_inventory, total_wip_orders = wip_data
-
-# --- KPI Calculations ---
-total_orders = len(all_orders_list)
-on_time_rate = overall_kpis['on_time_rate']
-data_quality_score = overall_kpis['data_quality_score']
-on_time_delta = f"{on_time_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
-data_quality_percent = f"{data_quality_score:.1f}%"
-data_quality_delta = f"{data_quality_score - DATA_QUALITY_TARGET:.1f}% vs Target"
-
-sla_violation_count = 0
-for o in overall_kpis['completed_orders']: 
-    received_str = o.get('received')
-    completed_str = o.get('dispatched_at') or o.get('packing_completed_at') 
-    
-    if received_str and completed_str:
-        try:
-            received_dt = datetime.fromisoformat(received_str)
-            completed_dt = datetime.fromisoformat(completed_str)
-            cycle_time_hours = (completed_dt - received_dt).total_seconds() / 3600
-            if cycle_time_hours > 168: 
-                sla_violation_count += 1
-        except:
-            pass 
-
-efficiency_score = (on_time_rate * 0.7) + (data_quality_score * 0.3)
-
-
-# -------------------------------------
-## 📊 Executive Summary KPIs
-# -------------------------------------
-
-# Adjusted to 7 columns to include the new WIP metric
-col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-
-col1.metric("Total Orders", total_orders, "Total in System")
-col2.metric("Orders Completed", overall_kpis['completed_count'], "Total Finished")
-col3.metric(
-    "Total WIP Orders", 
-    total_wip_orders, 
-    "Active Production (Non-Completed)"
-)
-col4.metric(
-    "Efficiency Score (WIP)", 
-    f"{efficiency_score:.1f}", 
-    help="Weighted Score: 70% OTD Rate + 30% Data Quality"
-)
-col5.metric(
-    "On-Time Delivery Rate", 
-    f"{on_time_rate:.1f}%", 
-    delta=on_time_delta, 
-    delta_color="normal" if on_time_rate >= ON_TIME_RATE_TARGET else "inverse"
-)
-col6.metric(
-    "SLA Violation Count",
-    sla_violation_count,
-    delta="Completed orders exceeding 7 days",
-    delta_color="inverse" if sla_violation_count > 0 else "normal"
-)
-col7.metric(
-    "Data Quality Score", 
-    data_quality_percent, 
-    delta=data_quality_delta, 
-    delta_color="normal" if data_quality_score >= DATA_QUALITY_TARGET else "inverse"
+st.dataframe(
+    df_show[[
+        "order_id", "customer", "customer_phone", "item", "qty",
+        "stage", "priority", "received", "due", "firebase_id"
+    ]],
+    use_container_width=True
 )
 
-st.divider()
+# ------------------------------------------------------------------------------------
+# ACTIONS: EXPORT / DELETE ALL
+# ------------------------------------------------------------------------------------
+colA, colB = st.columns(2)
 
-# -------------------------------------
-## 🏭 Work In Progress (WIP) Inventory Status (New Section)
-# -------------------------------------
+csv = df_show.to_csv(index=False).encode()
+colA.download_button("📥 Export to CSV", csv, "orders_export.csv", "text/csv")
 
-st.subheader("🏭 Work In Progress (WIP) Inventory Status")
-st.write(f"Showing inventory for **{total_wip_orders}** active orders currently in production (excluding Completed/Dispatched).")
+if colB.button("🗑️ Delete ALL Orders"):
+    for key in df["firebase_id"]:
+        delete(f"orders/{key}")
+    st.success("All orders deleted.")
+    st.rerun()
 
-if total_wip_orders > 0:
-    wip_df = pd.DataFrame([
-        {'Product Type': k, 'Total Quantity (Units)': v['total_qty'], 'Active Orders': v['order_count']}
-        for k, v in wip_inventory.items()
-    ])
-    
-    # Calculate Total WIP Quantity for a headline
-    total_wip_qty = wip_df['Total Quantity (Units)'].sum()
-    st.metric("Total Active WIP Quantity", f"{total_wip_qty:,} units", "Aggregate units currently in flow")
-    
-    st.dataframe(wip_df, use_container_width=True, hide_index=True)
-    
-    # WIP Chart
-    st.markdown("##### WIP Quantity Distribution")
-    wip_chart = alt.Chart(wip_df).mark_bar().encode(
-        x=alt.X('Total Quantity (Units)', title='Total Units in WIP'),
-        y=alt.Y('Product Type', sort='x'),
-        tooltip=['Product Type', alt.Tooltip('Total Quantity (Units)', format=',.0f'), 'Active Orders'],
-        color=alt.Color('Product Type', legend=None)
-    ).properties(
-        title="WIP Quantity Distribution by Product Type"
-    )
-    st.altair_chart(wip_chart, use_container_width=True)
-    
-else:
-    st.info("No orders currently in active Work In Progress (WIP). All orders are either completed or pending entry.")
+# ------------------------------------------------------------------------------------
+# PER-ORDER DETAILS
+# ------------------------------------------------------------------------------------
+st.subheader("🔎 View Order Details")
 
-st.divider()
-
-
-# -------------------------------------
-## 🧹 Data Quality Audit Visualization
-# -------------------------------------
-
-st.subheader("🧹 Data Quality Audit: Missing Critical Data")
-
-dq_df = pd.DataFrame(
-    overall_kpis['data_quality_breakdown'].items(),
-    columns=['Critical Field', 'Missing Count']
+selected_order = st.selectbox(
+    "Select Order",
+    ["Select"] + df_show["order_id"].tolist()
 )
 
-# Calculate percentage missing
-dq_df['Missing %'] = (dq_df['Missing Count'] / total_orders) * 100
-dq_df['Total Orders'] = total_orders
+if selected_order != "Select":
+    order = df[df["order_id"] == selected_order].iloc[0]
 
-# Altair chart for Data Quality
-dq_chart = alt.Chart(dq_df).mark_bar().encode(
-    x=alt.X('Missing Count', title='Number of Orders Missing Data'),
-    y=alt.Y('Critical Field', sort='x', title='Required Field'),
-    tooltip=['Critical Field', 'Missing Count', alt.Tooltip('Missing %', format='.1f')],
-    color=alt.Color('Missing %', scale=alt.Scale(scheme='reds'), legend=None)
-).properties(
-    title="Count of Orders Missing Critical Data Fields"
-)
+    with st.container(border=True):
+        st.markdown(f"## 🧾 Order: {order['order_id']}")
 
-st.altair_chart(dq_chart, use_container_width=True)
+        c1, c2 = st.columns(2)
+        c1.write(f"**Customer:** {order['customer']}")
+        c1.write(f"**Phone:** {order['customer_phone']}")
+        c1.write(f"**Product:** {order['item']}")
+        c1.write(f"**Priority:** {order['priority']}")
+        c1.write(f"**Qty:** {order['qty']}")
+        c1.write(f"**Stage:** {order['stage']}")
 
+        raw = base64.b64decode(order["order_qr"])
+        st.image(raw, width=180)
 
+        if st.button("🗑️ Delete This Order"):
+            delete(f"orders/{order['firebase_id']}")
+            st.success("Order deleted.")
+            st.rerun()
 
-st.divider()
+    # Timeline Chart
+    st.markdown("### 🕒 Order Production Timeline")
 
-# -------------------------------------
-## Segmented Performance Analysis
-# -------------------------------------
-st.subheader("Segmented Performance Analysis")
+    tl_data = []
+    for dept, key in stage_times.items():
+        if key in order and order[key]:
+            tl_data.append({"Department": dept, "Completed": to_dt(order[key])})
 
-bag_orders = [o for o in all_orders_list if o.get('product_type') == 'Bag']
-box_orders = [o for o in all_orders_list if o.get('product_type') == 'Box']
+    if tl_data:
+        df_tl = pd.DataFrame(tl_data)
 
-bag_kpis = analyze_kpis(bag_orders)
-box_kpis = analyze_kpis(box_orders)
-
-col_seg1, col_seg2 = st.columns(2)
-
-# Bag Segment
-with col_seg1:
-    st.markdown("#### Product Type: Bag")
-    if bag_kpis['completed_count'] > 0:
-        bag_rate = bag_kpis['on_time_rate']
-        bag_delta = f"{bag_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
-        
-        st.metric(
-            "OTD Rate (Bags)", 
-            f"{bag_rate:.1f}%", 
-            delta=bag_delta,
-            delta_color="normal" if bag_rate >= ON_TIME_RATE_TARGET else "inverse"
+        fig_tl = px.scatter(
+            df_tl,
+            x="Completed",
+            y="Department",
+            title="Order Production Timeline",
+            height=400
         )
-        st.markdown(f"**Avg. Cycle Time:** {bag_kpis['avg_cycle_time']}")
-        st.caption(f"{bag_kpis['completed_count']} completed orders analyzed.")
-        with st.expander("Bag Stage Time Breakdown"):
-            st.json(bag_kpis['avg_stage_times'])
-    else:
-        st.info("No completed 'Bag' orders for analysis.")
+        st.plotly_chart(fig_tl, use_container_width=True)
 
-# Box Segment
-with col_seg2:
-    st.markdown("#### Product Type: Box")
-    if box_kpis['completed_count'] > 0:
-        box_rate = box_kpis['on_time_rate']
-        box_delta = f"{box_rate - ON_TIME_RATE_TARGET:.1f}% vs Target"
-        
-        st.metric(
-            "OTD Rate (Boxes)", 
-            f"{box_rate:.1f}%", 
-            delta=box_delta,
-            delta_color="normal" if box_rate >= ON_TIME_RATE_TARGET else "inverse"
-        )
-        st.markdown(f"**Avg. Cycle Time:** {box_kpis['avg_cycle_time']}")
-        st.caption(f"{box_kpis['completed_count']} completed orders analyzed.")
-        with st.expander("Box Stage Time Breakdown"):
-            st.json(box_kpis['avg_stage_times'])
-    else:
-        st.info("No completed 'Box' orders for analysis.")
+# ------------------------------------------------------------------------------------
+# ANALYTICS SECTION
+# ------------------------------------------------------------------------------------
+st.subheader("📈 Analytics Dashboard")
 
-st.divider()
+# Monthly production
+df["month"] = df["received"].astype(str).str[:7]
 
-# -------------------------------------
-## ⚙️ Bottleneck and Stage Performance 
-# -------------------------------------
-
-avg_stage_times_seconds = {}
-for stage, total_s in overall_kpis['stage_time_totals'].items():
-    count = overall_kpis['stage_time_counts'].get(stage, 0)
-    if count > 0:
-        avg_stage_times_seconds[stage] = total_s / count
-
-if avg_stage_times_seconds:
-    # Bottleneck Detection
-    bottleneck_stage = max(avg_stage_times_seconds, key=avg_stage_times_seconds.get)
-    bottleneck_time = format_seconds_to_hms(avg_stage_times_seconds[bottleneck_stage])
-    
-    st.markdown(f"### 🛑 Current Bottleneck: **{bottleneck_stage}**")
-    st.markdown(f"The **{bottleneck_stage}** stage has the highest average duration: **{bottleneck_time}**.")
-
-    st.markdown("---")
-    
-    # Fastest & Slowest Orders
-    st.markdown("### Top Delays and Exceptional Performance (Fastest/Slowest Orders)")
-    
-    performance_table = []
-    for stage in PRODUCTION_STAGES:
-        stage_name = stage[0]
-        perf = overall_kpis['stage_performance'][stage_name]
-        
-        fastest_s, fastest_id = perf['fastest']
-        slowest_s, slowest_id = perf['slowest']
-        
-        if overall_kpis['stage_time_counts'].get(stage_name, 0) > 0:
-            performance_table.append({
-                "Stage": stage_name,
-                "Fastest Time": format_seconds_to_hms(fastest_s) if fastest_s != float('inf') else "N/A",
-                "Fastest Order": fastest_id or "N/A",
-                "Slowest Time (Delay)": format_seconds_to_hms(slowest_s) if slowest_s > 0 else "N/A",
-                "Slowest Order": slowest_id or "N/A",
-                "Total Orders Analyzed": overall_kpis['stage_time_counts'][stage_name]
-            })
-
-    st.dataframe(pd.DataFrame(performance_table), use_container_width=True, hide_index=True)
-
-
-st.divider()
-
-# -------------------------------------
-## 📈 Visualizations
-# -------------------------------------
-
-col_viz1, col_viz2 = st.columns(2)
-
-with col_viz1:
-    st.subheader("Order Count Distribution by Stage")
-    stage_counts: Dict[str, int] = {
-        "Design": 0, "Printing": 0, "DieCut": 0, "Assembly": 0, 
-        "Packing": 0, "Dispatch": 0, "Completed": 0
-    }
-    for o in orders.values():
-        stage = o.get('stage', 'Unknown')
-        if stage in stage_counts:
-            stage_counts[stage] += 1
-            
-    chart_data = pd.DataFrame(
-        list(stage_counts.items()),
-        columns=['Stage', 'Count']
-    )
-    
-    # Altair bar chart with proper sorting
-    chart = alt.Chart(chart_data).mark_bar().encode(
-        x=alt.X('Stage', sort=list(stage_counts.keys())),
-        y=alt.Y('Count', title='Number of Orders in Stage'),
-        tooltip=['Stage', 'Count'],
-        color=alt.Color('Stage')
-    ).properties(
-        title="Orders in Production Stages"
-    )
-    st.altair_chart(chart, use_container_width=True)
-
-# Visualization 2: Average Stage Time / Delay Heat-Map
-with col_viz2:
-    if overall_kpis['completed_count'] > 0 and any(overall_kpis['stage_time_counts'].values()):
-        
-        avg_time_chart_data = []
-        for stage, total_s in overall_kpis['stage_time_totals'].items():
-            count = overall_kpis['stage_time_counts'][stage]
-            if count > 0:
-                avg_time_chart_data.append({
-                    'Stage': stage,
-                    'Avg Time (Min)': (total_s / count) / 60 
-                })
-
-        avg_df = pd.DataFrame(avg_time_chart_data)
-        
-        st.subheader("Avg. Time Spent Per Stage (Delay Heat-Map)")
-        
-        chart = alt.Chart(avg_df).mark_bar().encode(
-            x=alt.X('Stage', sort=list(avg_stage_times_seconds.keys())),
-            y=alt.Y('Avg Time (Min)', title='Average Duration (Minutes)'),
-            color=alt.Color('Avg Time (Min)', scale=alt.Scale(scheme='yelloworangered'), legend=alt.Legend(title="Avg Time (Min)")),
-            tooltip=['Stage', alt.Tooltip('Avg Time (Min)', format='.2f')]
-        ).properties(
-            title="Stage Time Breakdown (Highest time is the Bottleneck)"
-        )
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Insufficient data for Average Stage Time analysis.")
-
-st.divider()
-
-# -------------------------------------
-## 🔍 Filter Panel
-# -------------------------------------
-
-st.markdown("#### Quick Action Filters")
-col_q1, col_q2, col_q3 = st.columns(3)
-quick_filter = col_q1.selectbox(
-    "Quick Filter Set",
-    ["None", "Late or Past Due", "High Priority Active", "Data Quality Issues"]
+fig_m = px.bar(
+    df.groupby("month").size().reset_index(name="count"),
+    x="month",
+    y="count",
+    title="Monthly Orders",
 )
+st.plotly_chart(fig_m, use_container_width=True)
 
-with st.expander("🔍 Advanced Filter & Search Orders", expanded=False):
-    
-    st.markdown("##### Filter by Stage, Product, and Priority")
-    col_s1, col_s2, col_s3 = st.columns(3)
-    
-    product_types = sorted(list(set(o.get('product_type') for o in all_orders_list if o.get('product_type'))))
-    priorities = sorted(list(set(o.get('priority') for o in all_orders_list if o.get('priority'))))
+# Weekly Production
+df["week"] = df["received"].astype(str).str[:10]
 
-    stage_filter = col_s1.selectbox(
-        "Stage",
-        ["All", "Design", "Printing", "DieCut", "Assembly", "Packing", "Dispatch", "Completed"],
-        key="stage_f"
-    )
-    
-    product_filter = col_s2.selectbox(
-        "Product Type",
-        ["All"] + product_types,
-        key="product_f"
-    )
-    
-    priority_filter = col_s3.selectbox(
-        "Priority",
-        ["All"] + priorities,
-        key="priority_f"
-    )
-
-    st.markdown("---")
-    
-    st.markdown("##### Filter by Date Range and Text Search")
-    
-    col_d1, col_d2, _ = st.columns([1, 1, 1])
-    start_date_filter = col_d1.date_input("Start Date (Received)", value=datetime.today().date() - timedelta(days=30), key="start_date")
-    end_date_filter = col_d2.date_input("End Date (Received)", value=datetime.today().date(), key="end_date")
-
-    col_t1, col_t2, _ = st.columns([1, 1, 1])
-    customer_filter = col_t1.text_input("Customer Name Search")
-    order_search = col_t2.text_input("Search Order ID")
-
-
-st.caption("Expand the filter box above to refine your search.")
-
-# -------------------------------------
-# APPLY FILTERS
-# -------------------------------------
-
-filtered: Dict[str, Any] = {}
-start_dt = datetime.combine(start_date_filter, datetime.min.time())
-end_dt = datetime.combine(end_date_filter, datetime.max.time())
-now = datetime.now()
-data_quality_keys = CRITICAL_DATA_KEYS 
-
-for key, o in orders.items():
-
-    if not isinstance(o, dict):
-        continue
-    
-    # --- QUICK FILTERS Logic ---
-    is_late_or_past_due = False
-    due_str = o.get('due')
-    completed_str = o.get('dispatched_at') or o.get('packing_completed_at')
-    is_completed = o.get('stage') == 'Completed'
-    
-    if due_str:
-        try:
-            due_dt = datetime.fromisoformat(due_str)
-            if (is_completed and completed_str and datetime.fromisoformat(completed_str) > due_dt) or \
-               (not is_completed and now > due_dt):
-                is_late_or_past_due = True
-        except:
-            pass 
-            
-    if quick_filter == "Late or Past Due" and not is_late_or_past_due:
-        continue
-        
-    elif quick_filter == "High Priority Active" and (o.get('priority') != 'High' or is_completed):
-        continue
-
-    elif quick_filter == "Data Quality Issues" and not any(not o.get(k) and o.get('received') for k in data_quality_keys):
-        continue
-            
-    # --- STANDARD FILTERS Logic ---
-    if stage_filter != "All" and o.get("stage") != stage_filter:
-        continue
-
-    if product_filter != "All" and o.get("product_type") != product_filter:
-        continue
-
-    if priority_filter != "All" and o.get("priority") != priority_filter:
-        continue
-            
-    received_str = o.get("received")
-    if received_str:
-        try:
-            received_dt = datetime.fromisoformat(received_str)
-            if received_dt < start_dt or received_dt > end_dt:
-                continue
-        except:
-            continue 
-
-    if customer_filter and customer_filter.lower() not in o.get("customer", "").lower():
-        continue
-
-    if order_search and order_search.lower() not in o.get("order_id", "").lower():
-        continue
-
-    filtered[key] = o
-
-# -------------------------------------
-# DISPLAY RESULTS & DOWNLOAD
-# -------------------------------------
-st.subheader(f"✅ Filtered Orders: {len(filtered)} found.")
-
-if not filtered:
-    st.info("No orders match the selected filters.")
-    st.stop()
-
-# Sort by received date for better overview
-sorted_filtered_list: list[Tuple[str, Any]] = sorted(
-    filtered.items(),
-    key=lambda x: x[1].get("received", "2099-12-31"),
-    reverse=True 
+fig_w = px.line(
+    df.groupby("week").size().reset_index(name="count"),
+    x="week",
+    y="count",
+    title="Weekly Production",
 )
+st.plotly_chart(fig_w, use_container_width=True)
 
-# --- Summary Table Construction ---
-summary_data = []
-for key, order in sorted_filtered_list:
-    stage = order.get('stage', 'N/A')
-    
-    is_late_indicator = "🟢 On Time"
-    due_dt_raw = order.get('due')
-    total_order_cycle = 'In Progress'
+# Product type pie chart
+if "product_type" in df:
+    fig_p = px.pie(
+        df,
+        names="product_type",
+        title="Product Type Distribution"
+    )
+    st.plotly_chart(fig_p, use_container_width=True)
 
-    if due_dt_raw:
-        try:
-            due_dt = datetime.fromisoformat(due_dt_raw)
-            completed_str = order.get('dispatched_at') or order.get('packing_completed_at')
-            
-            if stage == 'Completed' and completed_str:
-                completed_dt = datetime.fromisoformat(completed_str)
-                total_order_cycle = calculate_stage_duration(order.get('received'), completed_str)
-                if completed_dt > due_dt:
-                    is_late_indicator = "🔴 Late"
-            elif stage != 'Completed' and datetime.now() > due_dt:
-                is_late_indicator = "🟠 Past Due"
-        except:
-            is_late_indicator = "🟡 Due Date Error"
+# Time Consumption by Department
+st.markdown("### 🏭 Department Time Analysis")
 
-    summary_data.append({
-        "Order ID": order.get('order_id', key),
-        "Customer": order.get('customer', 'N/A'),
-        "Stage": stage,
-        "Priority": order.get('priority', 'N/A'),
-        "Product Type": order.get('product_type', 'N/A'),
-        "Quantity": order.get('qty', 'N/A'),
-        "Received": order.get('received', 'N/A').split('T')[0],
-        "Due Date": order.get('due', 'N/A').split('T')[0],
-        "Status": is_late_indicator,
-        "Total Cycle Time": total_order_cycle,
+dept_times = {}
+for dept, key in stage_times.items():
+    if key in df:
+        df[key] = df[key].apply(to_dt)
+        times = []
+        for idx, r in df.iterrows():
+            if r.get(key):
+                base = to_dt(r.get("received")) or to_dt(r.get("design_completed_at"))
+                if base and r[key]:
+                    times.append((r[key] - base).total_seconds())
+        if times:
+            dept_times[dept] = sum(times) / len(times)
+
+if dept_times:
+    df_d = pd.DataFrame({
+        "Department": list(dept_times.keys()),
+        "AvgTimeSec": list(dept_times.values())
     })
+    df_d["AvgHours"] = df_d["AvgTimeSec"] / 3600
 
-summary_df = pd.DataFrame(summary_data)
-
-st.markdown("#### High-Level Order Summary")
-
-col_sum_1, col_sum_2 = st.columns([3, 1])
-
-with col_sum_2:
-    # Download Report Button
-    csv_report = summary_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="⬇️ Download Filtered Report (CSV)",
-        data=csv_report,
-        file_name=f'filtered_orders_report_{datetime.now().strftime("%Y%m%d")}.csv',
-        mime='text/csv',
-        help="Download the currently visible table as a CSV file."
+    fig_d = px.bar(
+        df_d,
+        x="Department",
+        y="AvgHours",
+        title="Average Time Taken by Department (Hours)"
     )
+    st.plotly_chart(fig_d, use_container_width=True)
 
-with col_sum_1:
-    st.dataframe(
-        summary_df, 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "Total Cycle Time": st.column_config.TextColumn(
-                "Total Cycle Time",
-                help="Time from order received to final completion/dispatch."
-            )
-        }
-    )
+    slowest = df_d.iloc[df_d["AvgHours"].idxmax()]
+    fastest = df_d.iloc[df_d["AvgHours"].idxmin()]
 
-st.divider()
-
-st.subheader("Individual Order Details")
-
-for key, order in sorted_filtered_list:
-    
-    stage = order.get('stage', 'N/A')
-    progress, _ = get_completion_info(stage)
-    order_id = order.get('order_id', key) # Use the key if order_id is missing
-
-    total_order_cycle = ""
-    if stage == 'Completed':
-        total_order_cycle = calculate_stage_duration(order.get('received'), order.get('dispatched_at') or order.get('packing_completed_at'))
-        
-    expander_header = f"**{order_id}** — {order.get('customer', 'N/A')} | **Stage:** `{stage}`"
-    if total_order_cycle:
-        expander_header += f" | **Total Time:** {total_order_cycle}"
-
-
-    with st.expander(expander_header):
-        
-        # --- Single Order Delete Button ---
-        delete_col, _ = st.columns([1, 4])
-        with delete_col:
-            if st.button(f"🗑️ Delete Order {order_id}", key=f"delete_{order_id}", type="secondary", help="Permanently delete this single order from the database."):
-                delete_single_order(key) # Pass the database key for deletion
-
-        st.progress(progress, text=f"Overall Completion Progress: **{progress*100:.0f}%**")
-        
-        col_meta, col_dates = st.columns([1, 1])
-
-        with col_meta:
-            st.markdown("### Order Details")
-            st.write(f"**Product Type:** {order.get('product_type', 'N/A')}")
-            st.write(f"**Priority:** {order.get('priority', 'N/A')}")
-            st.write(f"**Item:** {order.get('item', 'N/A')}")
-            st.write(f"**Quantity:** {order.get('qty', 'N/A')}")
-
-        with col_dates:
-            st.markdown("### Key Timelines")
-            st.write(f"**Order Received:** {order.get('received', 'N/A').split('T')[0]}")
-            st.write(f"**Due Date:** {order.get('due', 'N/A').split('T')[0]}")
-            st.write(f"**Current Stage:** `{stage}`")
-
-
-        st.divider()
-
-        st.markdown("### Workflow Durations & Timestamps")
-        
-        # Calculate Durations
-        durations_data = {
-            "Design": calculate_stage_duration(order.get('started_at'), order.get('design_completed_at')),
-            "Printing": calculate_stage_duration(order.get('printing_started_at'), order.get('printing_completed_at')),
-            "DieCut": calculate_stage_duration(order.get('diecut_started_at'), order.get('diecut_completed_at')),
-            "Assembly": calculate_stage_duration(order.get('assembly_started_at'), order.get('assembly_completed_at')),
-            "Packing": calculate_stage_duration(order.get('packing_start'), order.get('packing_completed_at')),
-            "Dispatch": calculate_stage_duration(order.get('packing_completed_at'), order.get('dispatched_at')),
-        }
-        
-        # Format Timestamps for a table display (replacing the raw JSON)
-        timestamps_data = {
-            "Design Completed": order.get("design_completed_at", "N/A"),
-            "Printing Completed": order.get("printing_completed_at", "N/A"),
-            "DieCut Completed": order.get("diecut_completed_at", "N/A"),
-            "Assembly Completed": order.get("assembly_completed_at", "N/A"),
-            "Packing Completed": order.get("packing_completed_at", "N/A"),
-            "Dispatched": order.get("dispatched_at", "N/A"),
-        }
-        
-        # Convert timestamp to a nicer format (date only, or specific time if needed)
-        def format_timestamp(ts: str) -> str:
-            if ts and ts != "N/A":
-                try:
-                    return datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M")
-                except:
-                    return ts
-            return "N/A"
-
-        # Create DataFrame for display
-        workflow_df = pd.DataFrame({
-            "Stage": list(durations_data.keys()),
-            "Duration (H:M:S)": list(durations_data.values()),
-            "Completion Timestamp": [format_timestamp(timestamps_data[key]) for key in timestamps_data]
-        })
-
-        st.dataframe(workflow_df, use_container_width=True, hide_index=True)
-
-
-st.divider()
-
-# -------------------------------------
-## ⚠️ Danger Zone: Administrative Actions (Delete ALL Feature)
-# -------------------------------------
-st.subheader("⚠️ Danger Zone: Administrative Actions")
-
-if st.session_state["role"] == "admin":
-    st.warning("This action will **PERMANENTLY DELETE ALL ORDERS** in your database. Use with extreme caution.")
-    delete_all_col, _ = st.columns([1, 4])
-    
-    with delete_all_col:
-        delete_confirmation = st.checkbox("I understand and want to permanently delete ALL orders.")
-        
-        if delete_confirmation:
-            if st.button("🔴 Permanently Delete ALL Orders", type="primary"):
-                try:
-                    # Execute the assumed firebase delete operation for the entire 'orders' collection
-                    delete("orders") 
-                    st.success("✅ All orders deleted successfully. Refreshing page...")
-                    st.cache_data.clear() # Clear cache after delete
-                    st.rerun() # Rerun to fetch new, empty data
-                except Exception as e:
-                    st.error(f"❌ Failed to delete all orders: {e}. Ensure your 'firebase.delete' function is correctly configured to clear the 'orders' collection.")
+    st.success(f"⏳ **Most Time Consuming:** {slowest['Department']} ({slowest['AvgHours']:.2f} hrs)")
+    st.info(f"⚡ **Fastest Department:** {fastest['Department']} ({fastest['AvgHours']:.2f} hrs)")
