@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 # Assuming 'firebase' module exists and has 'read', 'delete', and 'write' functions
-# NOTE: The delete function implementation is assumed for this mock-up.
 from firebase import read, delete 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, Optional, List
@@ -72,7 +71,7 @@ def calculate_stage_duration(start_time: Optional[str], end_time: Optional[str])
             # We call get_stage_seconds with a mock order dict to leverage the cache
             diff_seconds = get_stage_seconds({'start': start_time, 'end': end_time}, 'start', 'end')
             if diff_seconds is not None:
-                 return f"**{format_seconds_to_hms(diff_seconds)}**"
+                return f"**{format_seconds_to_hms(diff_seconds)}**"
         except:
             return "N/A (Time Error)"
     return "In Progress"
@@ -98,7 +97,6 @@ def analyze_kpis(data_list: List[Dict[str, Any]]):
     Calculates key production metrics, including Cycle Time, On-Time Rate,
     Avg Stage Times, and Data Quality for a given list of orders.
     """
-    # ... (KPI analysis logic remains the same) ...
     total_cycle_time_seconds = 0
     on_time_count = 0
     
@@ -214,12 +212,10 @@ def fetch_and_analyze_data():
 
 def delete_single_order(order_key: str):
     """Handles the deletion of a single order and updates the state/cache."""
-    # Assuming 'delete' function takes collection name and document key
-    # For a list-of-dicts structure, this would involve re-saving the filtered list.
     
     try:
-        # Placeholder for actual firebase delete operation:
-        # delete("orders", order_key)
+        # Assuming 'delete' function takes collection name and document key
+        delete("orders", order_key)
         
         # Simulate successful deletion by clearing the cache
         st.cache_data.clear()
@@ -238,7 +234,7 @@ if not orders:
     st.warning("No orders found or data fetching failed.")
     st.stop()
 
-# --- KPI Calculations (remains the same) ---
+# --- KPI Calculations ---
 total_orders = len(all_orders_list)
 on_time_rate = overall_kpis['on_time_rate']
 data_quality_score = overall_kpis['data_quality_score']
@@ -324,6 +320,7 @@ dq_chart = alt.Chart(dq_df).mark_bar().encode(
 )
 
 st.altair_chart(dq_chart, use_container_width=True)
+
 
 
 st.divider()
@@ -494,7 +491,7 @@ with col_viz2:
 st.divider()
 
 # -------------------------------------
-## 🔍 Filter Panel (Logic remains the same)
+## 🔍 Filter Panel
 # -------------------------------------
 
 st.markdown("#### Quick Action Filters")
@@ -546,7 +543,7 @@ with st.expander("🔍 Advanced Filter & Search Orders", expanded=False):
 st.caption("Expand the filter box above to refine your search.")
 
 # -------------------------------------
-# APPLY FILTERS (Logic remains the same)
+# APPLY FILTERS
 # -------------------------------------
 
 filtered: Dict[str, Any] = {}
@@ -715,7 +712,7 @@ for key, order in sorted_filtered_list:
 
     with st.expander(expander_header):
         
-        # --- Single Order Delete Button (New Feature) ---
+        # --- Single Order Delete Button ---
         delete_col, _ = st.columns([1, 4])
         with delete_col:
             if st.button(f"🗑️ Delete Order {order_id}", key=f"delete_{order_id}", type="secondary", help="Permanently delete this single order from the database."):
@@ -798,10 +795,11 @@ if st.session_state["role"] == "admin":
         
         if delete_confirmation:
             if st.button("🔴 Permanently Delete ALL Orders", type="primary"):
-                st.error("Functionality requires 'write' access and a specific Firebase write operation which is NOT included in this code for safety. The action would execute Firebase's `delete('orders')` if implemented.")
-                # Placeholder for actual delete operation:
-                # from firebase import delete
-                # delete("orders") 
-                # st.success("✅ All orders deleted successfully. Refreshing page...")
-                # st.cache_data.clear() # Clear cache after delete
-                # st.rerun()
+                try:
+                    # Execute the assumed firebase delete operation for the entire 'orders' collection
+                    delete("orders") 
+                    st.success("✅ All orders deleted successfully. Refreshing page...")
+                    st.cache_data.clear() # Clear cache after delete
+                    st.rerun() # Rerun to fetch new, empty data
+                except Exception as e:
+                    st.error(f"❌ Failed to delete all orders: {e}. Ensure your 'firebase.delete' function is correctly configured to clear the 'orders' collection.")
