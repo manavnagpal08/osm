@@ -7,7 +7,7 @@ import base64
 import io
 import json 
 import time
-import numpy as np # Needed for NaT handling
+import numpy as np 
 
 # --- CONFIGURATION ---
 DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
@@ -33,9 +33,6 @@ def to_datetime_utc(x):
     except Exception:
         return None
 
-# NOTE: The format_df_date_display is now obsolete for data preparation
-# and is intentionally left out to resolve the error.
-
 # ------------------------------------------------------------------------------------
 # STICKY FILTER LOGIC (Query Params)
 # ------------------------------------------------------------------------------------
@@ -59,7 +56,7 @@ def set_sticky_filter_state(key, value):
         st.error(f"Error saving filter state for {key}: {e}")
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (Fixes for DateColumn and DatetimeArray)
+# LOAD & PRE-PROCESS ORDERS (Fixes for .dt Accessor and DateColumn)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -99,16 +96,14 @@ def load_and_process_orders():
     # Data Quality: Convert all time fields to a uniform UTC datetime dtype
     for key in stage_times.values():
         if key in df.columns:
+            # ⭐ FIX: Force conversion to datetime64[ns, UTC] using pd.to_datetime
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
 
 
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
-    # 🌟 FIX FOR DateColumn ERROR 🌟
-    # Convert the pandas Timestamp Series to a Python date object Series
-    # The .dt.date accessor converts Timestamp to datetime.date.
-    # We replace pd.NaT (the result of failed date conversion) with None.
+    # Fix for DateColumn error: convert Timestamp to Python date object
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
     # Calculate Time-In-Stage (Advanced Metric)
@@ -122,6 +117,7 @@ def load_and_process_orders():
             
             duration_timedelta = (df[end_col] - df[start_col])
             
+            # This .dt accessor is now safe because df[end_col] and df[start_col] are datetime64
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
@@ -141,8 +137,6 @@ if df.empty:
 if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.error("❌ Access Denied — Admin Only")
     st.stop()
-# Ensure set_page_config is only called once at the start before any st call,
-# though Streamlit recommends calling it at the top of the file.
 st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (UX Optimized)", layout="wide") 
 
 st.title("🛡️ Admin — Orders Management & Advanced Analytics")
@@ -158,6 +152,7 @@ col1.metric("Total Orders", len(df))
 col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
 col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
             delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
+# ⭐ FIX: This .dt accessor is now safe
 col4.metric("Orders This Month", 
             len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")]))
 col5.metric("Avg Order Qty", f"{df['Qty'].mean():.0f}" if 'Qty' in df else "N/A")
@@ -226,7 +221,6 @@ column_config = {
     "Qty": st.column_config.NumberColumn("Qty", required=True, min_value=0),
     "Stage": st.column_config.TextColumn("Stage", disabled=True),
     "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
-    # Compatible Date Column Type (expects date objects)
     "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True), 
     "Firebase ID": st.column_config.Column("Firebase ID", disabled=True) 
 }
@@ -250,7 +244,6 @@ if st.session_state.orders_data_editor['edited_rows']:
         original_firebase_id = df_filtered.iloc[index]['firebase_id']
         update_data = {}
         
-        # Map edited column names back to Firebase keys
         if 'Customer' in edits:
             update_data['customer'] = edits['Customer']
         if 'Phone' in edits:
@@ -260,10 +253,7 @@ if st.session_state.orders_data_editor['edited_rows']:
         if 'Priority' in edits:
             update_data['priority'] = edits['Priority']
         if 'Due_Date' in edits:
-            # The input is a datetime.date object from the DateColumn.
-            # Convert it to an ISO format string (UTC) for Firebase storage.
             try:
-                # Convert the date object to a datetime object at the end of the day, set to UTC
                 date_obj = edits['Due_Date']
                 dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
                 update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
@@ -341,6 +331,7 @@ with col_an2:
 # Time Consumption by Department - Bottleneck Analysis
 st.markdown("### ⏱️ Bottleneck Analysis: Average Time to Complete Stage (Hours)")
 
+
 stage_duration_cols = [c for c in df.columns if c.endswith('_duration_hours')]
 
 if stage_duration_cols:
@@ -362,8 +353,7 @@ if stage_duration_cols:
             color_continuous_scale=px.colors.sequential.Sunset,
         )
         st.plotly_chart(fig_d, use_container_width=True)
-        # 
-        
+
         slowest = df_d.iloc[df_d["AvgHours"].idxmax()]
         fastest = df_d.iloc[df_d["AvgHours"].idxmin()]
 
