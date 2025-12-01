@@ -200,16 +200,16 @@ if "previous_order" not in st.session_state:
 
 
 # =====================================================
-# STEP 1 – ORDER TYPE & CUSTOMER (FIXED Variable Overwriting Bug 🔥)
+# STEP 1 – ORDER TYPE & CUSTOMER (Bug Fixed for New Order Input 🔥)
 # =====================================================
 box = st.container(border=True)
 
-# Initialize input variables
+# 🚨 INPUT VARIABLES: Used for UI components (text_input)
 customer_input = ""
 customer_phone_input = ""
 customer_email_input = ""
 
-# Initialize logic/display variables
+# 🔑 LOGIC VARIABLES: Used for data processing/validation, cleared for New Order
 customer = ""
 customer_phone = ""
 customer_email = ""
@@ -227,17 +227,17 @@ with box:
 
     with col2:
         if order_type_simple == "New":
-            # Use *_input variables here
+            # Read directly into INPUT variables
             customer_input = st.text_input("Customer Name **(Mandatory)**", key="new_customer_name")
             customer_phone_input = st.text_input("Customer Phone **(Mandatory)**", key="new_customer_phone")
             customer_email_input = st.text_input("Customer Email", key="new_customer_email")
 
         else:
-            # Repeat Order Logic
+            # Repeat Order Logic: Sets LOGIC variables based on selection
             selected_customer = st.selectbox("Select Existing Customer", ["--- Select Customer ---"] + customer_list, key="repeat_customer_select")
             
             if selected_customer != "--- Select Customer ---":
-                customer = selected_customer # Assign to the logic variable for use in Step 2
+                customer = selected_customer 
 
                 cust_orders = {
                     k: o for k, o in all_orders.items()
@@ -251,6 +251,7 @@ with box:
                         reverse=True
                     )[0]
 
+                    # Assign auto-filled data directly to LOGIC variables for validation/data push
                     customer_phone = latest.get("customer_phone", "")
                     customer_email = latest.get("customer_email", "")
                 
@@ -262,7 +263,7 @@ with box:
                     st.warning("Customer phone number missing from the last order in database. Cannot send WhatsApp link.")
 
             else:
-                 customer = "" # Ensure logic variable is clear if nothing is selected
+                 customer = "" 
 
 
 # =====================================================
@@ -299,7 +300,7 @@ if order_type_simple == "Repeat" and customer:
                     st.success("Auto-fill applied! Scroll to Step 3 to review/edit.")
                     break
         else:
-            st.session_state["previous_order"] = None # Clear previous if 'Select Order' is chosen
+            st.session_state["previous_order"] = None 
 
 
 # =====================================================
@@ -350,14 +351,15 @@ with st.form("order_form", clear_on_submit=True):
 
     if submitted:
         # ---------------------------------
-        # Step 2: Assign Input Variables to Logic Variables (THE FIX 🔥)
+        # Step 2: Final Assignment for New Order Inputs (THE FIX 🔥)
         # ---------------------------------
         if order_type_simple == "New":
+            # Assign final values from INPUT fields to LOGIC fields for validation
             customer = customer_input.strip()
             customer_phone = customer_phone_input.strip()
             customer_email = customer_email_input.strip()
-        # For Repeat, 'customer', 'customer_phone', 'customer_email' are already set above 
-        # (or are empty if '--- Select Customer ---' was chosen).
+        # For Repeat Order, the LOGIC variables (customer, customer_phone, customer_email) 
+        # were already set in Step 1 based on the selection.
 
         # ---------------------------------
         # VALIDATION 
@@ -416,7 +418,6 @@ with st.form("order_form", clear_on_submit=True):
         qr_b64 = generate_qr_base64(order_id)
         whatsapp_link = get_whatsapp_link(final_phone, order_id, customer) 
         
-        # Email functionality
         tracking_link = f"https://srppackaging.com/tracking.html?id={order_id}"
         html_email = f"""
         <h2>Your Order {order_id} is Created</h2>
