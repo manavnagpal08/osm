@@ -337,34 +337,58 @@ with st.form("order_form", clear_on_submit=True):
 
         push("orders", data)
 
+        # ------------------------------
+        # GENERATE QR + PDF
+        # ------------------------------
         qr_b64 = generate_qr_base64(order_id)
-        whatsapp_link = get_whatsapp_link(customer_phone, order_id, customer)
-        tracking_link = f"https://srppackaging.com/tracking.html?id={order_id}"
-
         pdf_path = generate_order_pdf(data, qr_b64)
 
         with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
+            st.session_state["last_order_pdf"] = f.read()
 
-        st.download_button(
-            label="📄 Download Order PDF",
-            data=pdf_bytes,
-            file_name=f"{order_id}_order.pdf",
-            mime="application/pdf"
-        )
+        st.session_state["last_qr"] = qr_b64
+        st.session_state["last_order_id"] = order_id
+        st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone, order_id, customer)
+        st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
+        st.session_state["last_customer"] = customer
 
+        # Email content
         html_email = f"""
         <h2>Your Order {order_id} is Created</h2>
         <p>Hello {customer},</p>
         <p>Your order has been successfully created.</p>
         <p><b>Track your order</b> here:</p>
-        <p><a href="{tracking_link}">{tracking_link}</a></p>
+        <p><a href="{st.session_state['last_tracking']}">{st.session_state['last_tracking']}</a></p>
         """
 
         if customer_email:
             send_gmail(customer_email, f"Order {order_id} Created", html_email)
 
-        st.success("🎉 Order Created Successfully!")
-        st.image(base64.b64decode(qr_b64), width=200)
-        st.markdown(f"[💬 Send via WhatsApp]({whatsapp_link})")
-        st.balloons()
+        # Tell Streamlit that order is created
+        st.session_state["order_created_flag"] = True
+
+        st.rerun()
+# ---------------------------------------------------
+# SUCCESS BLOCK (OUTSIDE FORM)
+# ---------------------------------------------------
+if st.session_state.get("order_created_flag"):
+
+    st.success(f"🎉 Order {st.session_state['last_order_id']} Created Successfully!")
+
+    st.download_button(
+        label="📄 Download Order PDF",
+        data=st.session_state["last_order_pdf"],
+        file_name=f"{st.session_state['last_order_id']}_order.pdf",
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True
+    )
+
+    st.image(base64.b64decode(st.session_state["last_qr"]), width=200)
+
+    st.markdown(f"[💬 Send via WhatsApp]({st.session_state['last_whatsapp']})")
+
+    st.balloons()
+
+    st.session_state["order_created_flag"] = False
+
