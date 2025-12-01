@@ -3,7 +3,6 @@ import os
 from firebase import read
 
 # --- Streamlit Page Configuration ---
-# Set to 'collapsed' by default to handle non-admin users who shouldn't see it.
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
@@ -17,7 +16,6 @@ DEFAULT_ADMIN = {
     "role": "admin"
 }
 
-# Mapping of department roles to their corresponding module files
 DEPARTMENT_PAGE_MAP = {
     "design": "create_order.py",
     "printing": "printing.py",
@@ -74,9 +72,9 @@ def inject_global_css():
     <style>
         /* Global App Styling (Post-Login) */
         .stApp {
-            /* Set the overall background of the application (excluding sidebar) to pure white */
+            /* Main content area is pure white */
             background-color: #FFFFFF; 
-            font-family: 'Poppins', sans-serif; /* Use a modern font (if available) */
+            font-family: 'Poppins', sans-serif;
         }
 
         /* ------------------------------------------------------------- */
@@ -96,7 +94,7 @@ def inject_global_css():
             display: none !important;
         }
 
-        /* Login Card Styles (Kept the stylish glassmorphism) */
+        /* Login Card Styles */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
@@ -112,14 +110,13 @@ def inject_global_css():
         /* ... other login styles remain ... */
         
         /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING (Premium Enhancement) */
+        /* ADMIN SIDEBAR STYLING (Visibility Fix + Premium Enhancement) */
         /* ------------------------------------------------------------- */
         
         /* Sidebar Container: Dark gradient and strong shadow */
         .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
-            /* Dark Blue Gradient for a premium feel */
             background: linear-gradient(180deg, #2c3e50 0%, #1a242f 100%);
-            box-shadow: 4px 0 20px rgba(0,0,0,0.4); /* Deeper shadow */
+            box-shadow: 4px 0 20px rgba(0,0,0,0.4); 
             width: 280px !important; 
             min-width: 280px !important; 
             transition: all 0.3s ease-in-out;
@@ -129,10 +126,9 @@ def inject_global_css():
         .sidebar-header {
             padding: 30px 20px 10px 20px;
             color: #ecf0f1;
-            font-size: 26px; /* Slightly larger */
-            font-weight: 700; /* Bolder */
+            font-size: 26px; 
+            font-weight: 700; 
             text-align: center;
-            /* Use a gradient underline for extra pop */
             border-bottom: 2px solid;
             border-image: linear-gradient(to right, #2980b9, #1abc9c) 1;
             margin-bottom: 25px;
@@ -141,46 +137,44 @@ def inject_global_css():
         /* Navigation Links Container */
         [data-testid="stSidebar"] .stRadio > div { padding: 0 15px; }
 
-        /* Style the labels (the actual menu items) */
+        /* FIX: Ensure all text within the sidebar radio button is white */
+        [data-testid="stSidebar"] .stRadio label * {
+            color: #FFFFFF !important; /* Force all text elements (including custom span wrappers) to be white */
+        }
+        
+        /* FIX: Explicitly style the label itself for non-active links */
         [data-testid="stSidebar"] .stRadio label {
-            color: #bdc3c7; /* Subtle light gray text */
+            color: #FFFFFF !important; /* Set base text color to White */
             padding: 12px 15px;
-            margin-bottom: 8px; /* More spacing */
-            border-radius: 8px; /* Rounder corners */
-            transition: all 0.2s ease-in-out; /* Smooth transition */
+            margin-bottom: 8px; 
+            border-radius: 8px; 
+            transition: all 0.2s ease-in-out; 
             font-weight: 500;
             font-size: 15px;
         }
         
         /* Hover state: Subtle lift and bright color */
         [data-testid="stSidebar"] .stRadio label:hover {
-            background-color: rgba(44, 62, 80, 0.4); /* Lighter dark background */
-            color: #f1c40f; /* Vibrant yellow/gold for hover text */
-            transform: translateX(5px); /* Slide effect */
+            background-color: rgba(44, 62, 80, 0.4); 
+            color: #f1c40f !important; /* Vibrant yellow/gold for hover text */
+            transform: translateX(5px); 
             cursor: pointer;
         }
 
         /* Selected/Checked state: Solid active color */
         [data-testid="stSidebar"] .stRadio input:checked + div > span {
-            /* Vibrant teal background */
             background-color: #1abc9c !important; 
             color: white !important; 
             border-radius: 8px;
             font-weight: 700;
             padding: 12px 15px;
-            box-shadow: 0 4px 10px rgba(26, 188, 156, 0.3); /* Shadow for lift */
+            box-shadow: 0 4px 10px rgba(26, 188, 156, 0.3);
         }
         
-        /* Styling the emoji icons within the labels */
-        [data-testid="stSidebar"] .stRadio label > span:first-child {
-            margin-right: 10px;
-        }
-
-
         /* Logout Button Styling */
         [data-testid="stSidebar"] .stButton button {
             width: 90%;
-            margin: 25px 5% 15px 5%; /* More margin at the top */
+            margin: 25px 5% 15px 5%;
             background-color: #e74c3c; 
             color: white;
             border: none;
@@ -191,7 +185,7 @@ def inject_global_css():
         }
         [data-testid="stSidebar"] .stButton button:hover {
             background-color: #c0392b;
-            transform: scale(1.02); /* Slight scale on hover */
+            transform: scale(1.02);
         }
     </style>
     """, unsafe_allow_html=True)
@@ -256,13 +250,13 @@ def admin_sidebar():
     if "admin_menu_choice" not in st.session_state:
         st.session_state.admin_menu_choice = "Create Order"
 
+    # Display options now include emojis and text
     display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
     
     current_key = st.session_state.admin_menu_choice
     current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
     
-    # Simple, non-styled navigation header (the main styling comes from the radio buttons)
-    st.sidebar.markdown("### **🧭 Navigation**", unsafe_allow_html=True)
+    st.sidebar.markdown('<h3 style="color: #ecf0f1; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
     
     choice_with_icon = st.sidebar.radio(
         "", 
@@ -271,6 +265,7 @@ def admin_sidebar():
         key="admin_radio_menu" 
     )
 
+    # Extract the plain key (text after the emoji)
     choice = " ".join(choice_with_icon.split(" ")[1:])
 
     if choice != st.session_state.admin_menu_choice:
@@ -291,7 +286,6 @@ def department_router():
     
     role = st.session_state.get("role")
     
-    # Simple, clean interface for department users (no sidebar visible)
     with st.container(border=True):
         st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
         st.markdown("Please manage your assigned orders below.")
@@ -309,8 +303,7 @@ def department_router():
 def main_app():
     """Main function to handle post-login routing."""
     
-    # Main content header
-    st.markdown("<h1><span style='color:#3498db;'>📦</span> OMS Management System</h1>", unsafe_allow_html=True)
+    st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
     st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
     st.markdown("---")
 
@@ -329,8 +322,6 @@ def main_app():
 inject_global_css()
 
 if "role" not in st.session_state:
-    # User is not logged in, show the login screen.
     login_screen()
 else:
-    # User is logged in, show the main application.
     main_app()
