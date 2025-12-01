@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-# Assuming 'firebase' module handles connection (read, update, delete)
 from firebase import read, update, delete 
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 import time
 import numpy as np 
 
@@ -64,12 +63,12 @@ if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (Includes fixes, but removes error-prone data prep)
+# LOAD & PRE-PROCESS ORDERS (Fixes for all data type issues)
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
 def load_and_process_orders():
-    """Loads orders from Firebase and performs initial data cleaning."""
+    """Loads orders from Firebase and performs initial data cleaning and advanced metrics."""
     orders = read("orders") or {}
     data = []
     for key, o in orders.items():
@@ -101,47 +100,36 @@ def load_and_process_orders():
         "Completed": "dispatch_completed_at", 
     }
 
-    # Data Quality: Only convert columns required for subtraction or editing (Due_Date)
-    # The 'received' column is NOT converted here, ensuring the original dtype
-    # is kept and no subsequent .dt accessor errors occur on it.
+    # Data Quality: Robust conversion for ALL time fields.
+    all_time_keys = list(set(stage_times.values()) | set(['due']))
     
-    # List of time columns *needed* for stage duration calculation (excludes 'received')
-    duration_cols = list(stage_times.values())
-    if 'received' in duration_cols:
-        duration_cols.remove('received')
-    
-    # List of time columns *needed* for editing (includes 'due')
-    edit_cols = ['due']
-    
-    for key in duration_cols + edit_cols:
+    for key in all_time_keys:
         if key in df.columns:
-            # Force conversion to datetime64[ns, UTC] for duration calcs and editing prep
+            # Force conversion to datetime64[ns, UTC]. This is the safest way.
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
-
 
     # Prepare columns for the data_editor 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
     
-    # Fix for DateColumn error: convert Timestamp to a Python date object
-    # This is safe because df['due'] was explicitly converted above.
+    # Convert Timestamp to a Python date object for st.data_editor compatibility
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
-    # Calculate Time-In-Stage (Advanced Metric) - This still uses .dt, but on safely converted columns
+    # --- Advanced Metric: Time to Deadline ---
+    # Calculate time remaining/overdue in days
+    current_time = datetime.now(timezone.utc)
+    # The 'due' column is already guaranteed to be datetime64[ns, UTC]
+    time_delta = df['due'] - current_time
+    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) # Days
+
+    # Calculate Time-In-Stage
     for i in range(1, len(production_stages)):
         prev_stage = production_stages[i-1]
         
         start_col = stage_times.get(prev_stage)
         end_col = stage_times.get(production_stages[i])
 
-        # Skip calculation if the start date is the unconverted 'received' column
-        if start_col == 'received':
-            continue 
-
         if start_col in df.columns and end_col in df.columns:
-            
-            # Subtraction is safe because these columns are converted above
             duration_timedelta = (df[end_col] - df[start_col])
-            
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
@@ -169,8 +157,9 @@ col1.metric("Total Orders", len(df))
 col2.metric("Completed Orders", len(df[df["stage"] == "Completed"]))
 col3.metric("Active Orders", len(df[df["stage"] != "Completed"]), 
             delta=f"{len(df[df['stage'] != 'Completed'])/len(df)*100:.1f}% of Total" if len(df) > 0 else "0%")
-# REMOVED ERROR-CAUSING FEATURE: Replaced with placeholder
-col4.metric("Orders This Month", "N/A (Feature Disabled)") 
+# REINTRODUCED DATE METRIC
+orders_this_month = len(df[df["received"].dt.strftime("%Y-%m") == datetime.now().strftime("%Y-%m")])
+col4.metric("Orders This Month", orders_this_month) 
 col5.metric("Avg Order Qty", f"{df['Qty'].mean():.0f}" if 'Qty' in df else "N/A")
 
 st.markdown("---")
@@ -205,6 +194,9 @@ if stage_filter != "All":
 if priority_filter != "All":
     df_filtered = df_filtered[df_filtered["priority"] == priority_filter]
 
+# Add a warning if filtered DataFrame is empty
+if df_filtered.empty:
+    st.warning("No orders match the current filter criteria.")
 
 # ------------------------------------------------------------------------------------
 ## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)
@@ -214,7 +206,7 @@ st.markdown("## 📋 Orders Table (Inline Edit, Sort, Search, Paginate)")
 # Select columns for display and editing
 df_display = df_filtered[[
     "order_id", "customer", "customer_phone", "item", "Qty", 
-    "stage", "priority", "Due_Date", "firebase_id" 
+    "stage", "priority", "Due_Date", "Time_To_Deadline", "firebase_id" 
 ]].rename(columns={
     "customer_phone": "Phone",
     "order_id": "Order ID",
@@ -222,7 +214,8 @@ df_display = df_filtered[[
     "item": "Item",
     "stage": "Stage",
     "priority": "Priority",
-    "firebase_id": "Firebase ID"
+    "firebase_id": "Firebase ID",
+    "Time_To_Deadline": "Deadline (Days)" # Rename advanced column
 })
 
 # Define the data editor configuration for inline editing
@@ -235,6 +228,12 @@ column_config = {
     "Stage": st.column_config.TextColumn("Stage", disabled=True),
     "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
     "Due_Date": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD", required=True), 
+    "Deadline (Days)": st.column_config.NumberColumn(
+        "Deadline (Days)",
+        help="Days remaining until the deadline (negative means overdue)",
+        format="%.1f days",
+        disabled=True
+    ),
     "Firebase ID": st.column_config.Column("Firebase ID", disabled=True) 
 }
 
@@ -253,8 +252,14 @@ if st.session_state.orders_data_editor['edited_rows']:
     
     edited_rows = st.session_state.orders_data_editor['edited_rows']
     
-    for index, edits in edited_rows.items():
-        original_firebase_id = df_filtered.iloc[index]['firebase_id']
+    for position, edits in edited_rows.items():
+        # ⭐ CRITICAL FIX: Get the original index value from the filtered DataFrame
+        # using the positional indexer (`position`), then use that index value 
+        # to access the row data in df_filtered by `.loc[index_value]`.
+        original_index_value = df_filtered.iloc[position].name 
+        original_firebase_id = df_filtered.loc[original_index_value, 'firebase_id']
+        order_id_for_toast = df_filtered.loc[original_index_value, 'order_id']
+
         update_data = {}
         
         if 'Customer' in edits:
@@ -268,15 +273,16 @@ if st.session_state.orders_data_editor['edited_rows']:
         if 'Due_Date' in edits:
             try:
                 date_obj = edits['Due_Date']
+                # Convert the date object to a datetime object at the end of the day, set to UTC
                 dt_obj = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=timezone.utc)
                 update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
             except ValueError:
-                st.error(f"Invalid date format for order {df_filtered.iloc[index]['order_id']}. Date not updated.")
+                st.error(f"Invalid date format for order {order_id_for_toast}. Date not updated.")
                 continue
 
         if update_data:
             update(f"orders/{original_firebase_id}", update_data)
-            st.toast(f"✅ Updated Order ID: {df_filtered.iloc[index]['Order ID']}", icon='💾')
+            st.toast(f"✅ Updated Order ID: {order_id_for_toast}", icon='💾')
 
     time.sleep(0.5) 
     st.session_state.orders_data_editor['edited_rows'] = {}
@@ -308,7 +314,7 @@ if colB.button("🗑️ Delete ALL Orders", type="secondary"):
 
 st.markdown("---")
 
-## 📈 Analytics Dashboard
+## 📈 Advanced Analytics Dashboard
 
 col_an1, col_an2 = st.columns(2)
 
@@ -323,13 +329,24 @@ with col_an1:
     )
     st.plotly_chart(fig_stage, use_container_width=True)
 
-# REMOVED ERROR-CAUSING FEATURE: Monthly Orders Volume chart
+# Monthly production (Reintroduced)
 with col_an2:
     st.markdown("### 🗓️ Monthly Orders Volume")
-    st.info("Monthly analysis is disabled to prevent data type errors. Only showing total count.")
-    st.metric("Total Records Analyzed", len(df))
+    df["received_month"] = df["received"].dt.to_period("M").astype(str)
+    
+    fig_m = px.bar(
+        df.groupby("received_month").size().reset_index(name="count"),
+        x="received_month",
+        y="count",
+        title="Orders Received by Month",
+        labels={"received_month": "Month", "count": "Order Count"},
+        color="count",
+        color_continuous_scale=px.colors.sequential.Agsunset,
+    )
+    st.plotly_chart(fig_m, use_container_width=True)
 
 ### ⏱️ Bottleneck Analysis: Average Time to Complete Stage (Hours)
+st.markdown("### ⏱️ Bottleneck Analysis: Average Time to Complete Stage (Hours)")
 
 
 stage_duration_cols = [c for c in df.columns if c.endswith('_duration_hours')]
