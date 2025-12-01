@@ -8,3 +8,4 @@ Pillow
 barcode
 python-barcode
 plotly
+firebase_admin
