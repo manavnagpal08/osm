@@ -9,9 +9,13 @@ st.set_page_config(page_title="Printing Department", layout="wide", page_icon="�
 # ---------------------------
 # ROLE CHECK
 # ---------------------------
+# Determine if the current user is an admin
+IS_ADMIN = st.session_state.get("role") == "admin"
+
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
+# Printing users and Admin can access this page
 if st.session_state["role"] not in ["printing", "admin"]:
     st.error("❌ You do not have permission to access this page.")
     st.stop()
@@ -135,7 +139,7 @@ filtered_pending = apply_filters(all_pending_orders, search_query, assign_filter
 filtered_completed = apply_filters(all_completed_orders, search_query, assign_filter, quality_filter)
 
 # ========================================================
-# HTML REPORT GENERATION FUNCTION (FOR DOWNLOAD/PRINT-TO-PDF)
+# HTML REPORT GENERATION FUNCTION 
 # ========================================================
 def generate_order_report(order: dict) -> bytes:
     """Generates a detailed HTML report string for professional print-to-PDF."""
@@ -236,7 +240,7 @@ def generate_order_report(order: dict) -> bytes:
     return html_content.encode("utf-8")
 
 # ---------------------------
-# FILE UTILITIES (Kept the same for non-report files)
+# FILE UTILITIES
 # ---------------------------
 
 def file_download_button(label, file_entry, order_id, file_label, key_prefix):
@@ -336,7 +340,7 @@ with tab1:
                     st.metric("Qty", o.get('qty', 'N/A'))
                     st.metric("Due Date", o.get('due', 'N/A'))
 
-                # REPORT BUTTON (NOW HTML FOR PDF PRINTING)
+                # REPORT BUTTON
                 with report_col:
                     st.markdown("##### ") 
                     report_content = generate_order_report(o)
@@ -344,7 +348,7 @@ with tab1:
                         label="📄 Generate Full Report (HTML/PDF)",
                         data=report_content,
                         file_name=f"{order_id}_Production_Report.html",
-                        mime="text/html", # Key change: uses HTML for better formatting
+                        mime="text/html", 
                         key=f"report_dl_{key}",
                         use_container_width=True
                     )
@@ -358,18 +362,30 @@ with tab1:
                 # ===============================================
                 st.subheader("⚙️ Specifications & Assignment")
                 
-                a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
-
-                # Assigned To (Selectbox)
-                with a_col:
-                    current_assignee = printing_specs.get("assigned_to", "Unassigned")
-                    new_assignee = st.selectbox(
-                        "Assigned To",
-                        options=printer_names,
-                        index=printer_names.index(current_assignee) if current_assignee in printer_names else 0,
-                        key=f"assign_{key}"
-                    )
+                # Use a specific layout for assignment based on role
+                if IS_ADMIN:
+                    a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
+                else:
+                    # Printing users don't need the assignment select box
+                    a_col, pq_col, ps_col, bs_col = st.columns([1.5, 1.5, 1, 1])
                 
+                current_assignee = printing_specs.get("assigned_to", "Unassigned")
+                
+                # Assigned To (Controlled Access)
+                with a_col:
+                    if IS_ADMIN:
+                        # Admin sees editable select box
+                        new_assignee = st.selectbox(
+                            "Assigned To",
+                            options=printer_names,
+                            index=printer_names.index(current_assignee) if current_assignee in printer_names else 0,
+                            key=f"assign_{key}"
+                        )
+                    else:
+                        # Printing team sees read-only text
+                        st.text_input("Assigned To", value=current_assignee, disabled=True, key=f"assign_ro_{key}")
+                        new_assignee = current_assignee # Keep current value for save operation
+
                 # Paper Quality
                 with pq_col:
                     new_paper_quality = st.text_input(
@@ -400,7 +416,7 @@ with tab1:
                 # Save Specs Button
                 if st.button("💾 Save Specifications", key=f"save_specs_{key}", type="secondary", use_container_width=True):
                     updated_specs = {
-                        "assigned_to": new_assignee,
+                        "assigned_to": new_assignee, # Uses the selected value if admin, or the read-only value if printer
                         "paper_quality": new_paper_quality,
                         "paper_size": new_paper_size,
                         "board_size": new_board_size
@@ -506,8 +522,12 @@ with tab1:
                     )
                     
                     if st.button("💾 Save Printing Notes", key=f"save_print_notes_{key}", use_container_width=True):
-                        printing_specs["printing_notes"] = new_print_notes
-                        update(f"orders/{key}", {"printing_specs": printing_specs})
+                        # Note: We must re-fetch specs here to ensure we don't overwrite non-admin changes (like assignment)
+                        current_specs_before_save = read(f"orders/{key}").get("printing_specs", {})
+                        
+                        # Preserve all existing specs, only update the notes field
+                        current_specs_before_save["printing_notes"] = new_print_notes
+                        update(f"orders/{key}", {"printing_specs": current_specs_before_save})
                         st.toast("Printing notes saved!", icon="💾")
                         st.rerun()
 
