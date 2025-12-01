@@ -33,8 +33,8 @@ st.caption("Manage artwork, files, notes, and track design time efficiently.")
 orders = read("orders") or {}
 
 all_pending_orders = {}
-completed_orders = {}
-priority_options = ["All", "High", "Medium", "Low"] # Define filter options
+all_completed_orders = {} 
+priority_options = ["All", "High", "Medium", "Low"]
 
 for key, o in orders.items():
     if not isinstance(o, dict):
@@ -43,7 +43,7 @@ for key, o in orders.items():
     if o.get("stage") == "Design":
         all_pending_orders[key] = o
     elif o.get("design_completed_at"):
-        completed_orders[key] = o
+        all_completed_orders[key] = o
 
 
 # ========================================================
@@ -211,47 +211,57 @@ def file_card(col, order_id, file_key, label, allowed, firebase_key):
             )
 
 # ========================================================
-# FILTER AND SEARCH LOGIC
+# FILTER AND SEARCH SETUP (MAIN PAGE)
 # ========================================================
 
-# 1. Sidebar for filter/search
-with st.sidebar:
-    st.header("🔍 Filter Orders")
+filter_col, search_col = st.columns([1, 2.5])
 
+with search_col:
     # Search
     search_query = st.text_input(
         "Search by Order ID or Customer Name", 
-        key="search_pending"
+        key="search_global",
+        placeholder="Enter Order ID or Customer Name..."
     ).lower()
 
+with filter_col:
     # Priority Filter
     priority_filter = st.selectbox(
         "Filter by Priority",
         options=priority_options,
         index=0,
-        key="priority_filter"
+        key="priority_filter",
+        label_visibility="visible"
     )
 
-# 2. Apply filters to pending orders
-filtered_pending_orders = {}
+st.markdown("---")
 
-for key, order in all_pending_orders.items():
-    
-    # Priority Filter Check
-    priority_match = (priority_filter == "All" or 
-                      order.get("priority") == priority_filter)
-    
-    # Search Filter Check
-    search_match = True
-    if search_query:
-        order_id = order.get("order_id", "").lower()
-        customer = order.get("customer", "").lower()
+
+# 2. Function to apply filters
+def apply_filters(orders_dict, search_q, priority_f):
+    filtered_orders = {}
+    for key, order in orders_dict.items():
         
-        if search_query not in order_id and search_query not in customer:
-            search_match = False
+        # Priority Filter Check
+        priority_match = (priority_f == "All" or 
+                          order.get("priority") == priority_f)
+        
+        # Search Filter Check
+        search_match = True
+        if search_q:
+            order_id = order.get("order_id", "").lower()
+            customer = order.get("customer", "").lower()
             
-    if priority_match and search_match:
-        filtered_pending_orders[key] = order
+            if search_q not in order_id and search_q not in customer:
+                search_match = False
+                
+        if priority_match and search_match:
+            filtered_orders[key] = order
+    return filtered_orders
+
+# 3. Apply filters to both sets
+filtered_pending_orders = apply_filters(all_pending_orders, search_query, priority_filter)
+filtered_completed_orders = apply_filters(all_completed_orders, search_query, priority_filter)
 
 # ================================
 # SECTION 2 — PENDING DESIGNS
@@ -259,7 +269,7 @@ for key, order in all_pending_orders.items():
 
 tab_pending, tab_completed = st.tabs([
     f"🛠️ Pending Designs ({len(filtered_pending_orders)})",
-    f"✅ Completed Designs ({len(completed_orders)})"
+    f"✅ Completed Designs ({len(filtered_completed_orders)})"
 ])
 
 
@@ -404,10 +414,10 @@ with tab_completed:
 
     st.header("✅ Completed Designs")
 
-    if not completed_orders:
-        st.info("No completed designs yet.")
+    if not filtered_completed_orders: 
+        st.info("No completed designs matching your filters yet.")
 
-    for firebase_key, order in completed_orders.items():
+    for firebase_key, order in filtered_completed_orders.items(): 
 
         order_id = order.get("order_id")
         customer = order.get("customer")
