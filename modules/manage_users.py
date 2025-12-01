@@ -1,14 +1,15 @@
 import streamlit as st
 import pandas as pd
 # Assuming the firebase module provides read, update, and delete functions
-# The 'delete' function is temporarily commented out due to the import error.
-from firebase import read, update 
+# The 'delete' function is now imported and used since it's available in firebase.py
+from firebase import read, update, delete 
 
 # --- Constants ---
 USER_ROLES = [
     "admin",
     "design",
     "printing",
+    "lamination", # NEW DEPARTMENT ADDED
     "diecut",
     "assembly",
     "packaging",
@@ -57,20 +58,20 @@ def create_user(username, password, role):
     st.session_state["refresh_users"] = True # Trigger refresh
     return True
 
-# NOTE: Deletion functionality is temporarily commented out until 'delete' function is available in firebase.py
-# def delete_user_by_username(username):
-#     """Deletes a user document by username."""
-#     # Ensure the default admin cannot be deleted
-#     if username.lower() == "admin":
-#         st.error("The default 'admin' user cannot be deleted.")
-#         return
+# Deletion functionality is now enabled
+def delete_user_by_username(username):
+    """Deletes a user document by username."""
+    # Ensure the default admin cannot be deleted
+    if username.lower() == "admin":
+        st.error("The default 'admin' user cannot be deleted.")
+        return
 
-#     try:
-#         delete(f"users/{username}")
-#         st.success(f"User '{username}' deleted successfully.")
-#         st.session_state["refresh_users"] = True # Trigger refresh
-#     except Exception as e:
-#         st.error(f"Failed to delete user {username}: {e}")
+    try:
+        delete(f"users/{username}")
+        st.success(f"User '{username}' deleted successfully.")
+        st.session_state["refresh_users"] = True # Trigger refresh
+    except Exception as e:
+        st.error(f"Failed to delete user {username}: {e}")
 
 # --- Layout and UI Functions ---
 
@@ -154,12 +155,26 @@ def render_manage_table(df_users):
             st.rerun()
 
     st.markdown("---")
-    st.subheader("❌ Delete Users (Unavailable)")
+    st.subheader("❌ Delete Users")
     
-    # A separate section for deletion, showing it's unavailable
-    st.error("User deletion is unavailable. Please ensure the `delete` function is implemented in `firebase.py`.")
-    
-
+    # User selection for deletion (Re-enabled)
+    usernames = df_users['Username'].tolist()
+    if usernames:
+        # Filter out the 'admin' user from the deletion selection
+        deletable_users = [u for u in usernames if u.lower() != "admin"]
+        
+        if deletable_users:
+            user_to_delete = st.selectbox("Select User to Delete", deletable_users, key="delete_user_select")
+            
+            if user_to_delete:
+                # Use a confirmation mechanism before deletion
+                st.warning(f"Are you absolutely sure you want to delete user **{user_to_delete}**? This cannot be undone.", icon="⚠️")
+                
+                if st.button(f"Yes, Permanently Delete {user_to_delete}", type="primary"):
+                    delete_user_by_username(user_to_delete)
+                    st.rerun()
+        else:
+            st.info("The only user remaining is the protected 'admin' user.")
 
 # --- Main Application Logic ---
 
