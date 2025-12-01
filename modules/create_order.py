@@ -73,7 +73,7 @@ def send_gmail(to, subject, html):
 # PDF GENERATOR
 
 def generate_order_pdf(data, qr_b64):
-    logo_path = "srplogo.png"  # your logo
+    logo_path = "srplogo.png"  # Logo file must exist
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(temp_file.name, pagesize=A4)
@@ -81,72 +81,72 @@ def generate_order_pdf(data, qr_b64):
     width, height = A4
     x_margin = 40
 
-    # -----------------------------------------
-    # PREMIUM HEADER (Dual Green Gradient)
-    # -----------------------------------------
-    
-    # Gradient simulation using two rectangles
-    c.setFillColorRGB(0.05, 0.48, 0.22)   # dark green
-    c.rect(0, height - 100, width * 0.65, 100, stroke=0, fill=1)
+    # ============================================================
+    #                    PREMIUM HEADER V3 (FIXED)
+    # ============================================================
 
-    c.setFillColorRGB(0.07, 0.56, 0.27)   # bright green
-    c.rect(width * 0.65, height - 100, width * 0.35, 100, stroke=0, fill=1)
+    # Green full-width bar
+    c.setFillColorRGB(0.05, 0.48, 0.22)   # Dark professional green
+    c.rect(0, height - 110, width, 110, stroke=0, fill=1)
 
     # Logo
     try:
-        c.drawImage(logo_path, x_margin, height - 95, width=75, preserveAspectRatio=True, mask='auto')
+        c.drawImage(logo_path, x_margin, height - 100, width=95,
+                    preserveAspectRatio=True, mask='auto')
     except:
         pass
 
+    # Separator line (thin white)
+    c.setStrokeColorRGB(1, 1, 1)
+    c.setLineWidth(1.2)
+    c.line(x_margin + 120, height - 100, x_margin + 120, height - 20)
+
     # Company Name
     c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(x_margin + 90, height - 45, "Shree Ram Packers")
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(x_margin + 140, height - 50, "Shree Ram Packers")
 
     # Tagline
-    c.setFont("Helvetica", 12)
-    c.drawString(x_margin + 90, height - 68, "Premium Packaging & Printing Solutions")
-
-    # Right-aligned Company Info
     c.setFont("Helvetica", 11)
-    c.setFillColorRGB(1, 1, 1)
+    c.drawString(x_margin + 140, height - 72,
+                 "Premium Packaging & Printing Solutions")
 
-    right_x = width - 320
-    lines = [
-        "Plot No 54, Verrapa Reddy Layout,",
-        "Parappana Agrahara, Hosa Road,",
-        "Electronic City Post, Bangalore - 560100, Karnataka",
-        "",
+    # Right-aligned company info (clean & aligned)
+    c.setFont("Helvetica", 11)
+    info_y = height - 45
+
+    details = [
+        "Plot No 54, Verrapa Reddy Layout, Parappana Agrahara,",
+        "Hosa Road, Electronic City Post, Bangalore - 560100, Karnataka",
         "Mobile: 9312215239",
         "GSTIN: 29BCIPK6225L1Z6",
         "Website: https://srppackaging.com/"
     ]
 
-    offset = 40
-    for line in lines:
-        c.drawString(right_x, height - offset, line)
-        offset += 15
+    for line in details:
+        c.drawRightString(width - x_margin, info_y, line)
+        info_y -= 15
 
-    # Divider line
-    y = height - 120
-    c.setStrokeColorRGB(0.05, 0.48, 0.22)
+    # Divider Line
+    y = height - 130
+    c.setStrokeColorRGB(0.07, 0.56, 0.27)
     c.setLineWidth(3)
     c.line(x_margin, y, width - x_margin, y)
 
-    y -= 30
+    # Reset colors for content
     c.setFillColorRGB(0, 0, 0)
+    c.setStrokeColorRGB(0, 0, 0)
+    y -= 30
 
-    # ------------------------------------------------------
-    # CUSTOMER DETAILS
-    # ------------------------------------------------------
+    # ============================================================
+    #                     CUSTOMER DETAILS
+    # ============================================================
+
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Customer Details")
     y -= 20
-    c.setLineWidth(0.6)
     c.line(x_margin, y, width - x_margin, y)
     y -= 15
-
-    c.setFont("Helvetica", 11)
 
     customer_fields = [
         ("Customer Name", data["customer"]),
@@ -155,6 +155,8 @@ def generate_order_pdf(data, qr_b64):
         ("Received Date", data["received"]),
         ("Due Date", data["due"])
     ]
+
+    c.setFont("Helvetica", 11)
 
     for label, value in customer_fields:
         c.setFont("Helvetica-Bold", 11)
@@ -165,13 +167,13 @@ def generate_order_pdf(data, qr_b64):
 
     y -= 15
 
-    # ------------------------------------------------------
-    # ORDER DETAILS
-    # ------------------------------------------------------
+    # ============================================================
+    #                       ORDER DETAILS
+    # ============================================================
+
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Order Details")
     y -= 20
-    c.setLineWidth(0.6)
     c.line(x_margin, y, width - x_margin, y)
     y -= 20
 
@@ -186,7 +188,7 @@ def generate_order_pdf(data, qr_b64):
         ("Size ID", data["size_id"]),
         ("Foil ID", data["foil_id"]),
         ("Spot UV ID", data["spotuv_id"]),
-        ("Description", data["item"])
+        ("Product Description", data["item"])
     ]
 
     for label, value in order_fields:
@@ -196,15 +198,16 @@ def generate_order_pdf(data, qr_b64):
         c.drawString(x_margin + 150, y, str(value))
         y -= 18
 
-        if y < 120:  # page break safety
+        if y < 120:
             c.showPage()
             y = height - 60
 
     y -= 20
 
-    # ------------------------------------------------------
-    # QR CODE BLOCK
-    # ------------------------------------------------------
+    # ============================================================
+    #                        QR CODE
+    # ============================================================
+
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
@@ -213,21 +216,22 @@ def generate_order_pdf(data, qr_b64):
     c.setFont("Helvetica-Bold", 12)
     c.setFillColorRGB(0.05, 0.48, 0.22)
     c.drawString(width - 200, y + 140, "Scan to Track Order")
+    c.setFillColorRGB(0, 0, 0)
 
     c.drawImage(qr_temp.name, width - 180, y, width=130, height=130)
 
-    c.setFillColorRGB(0, 0, 0)
+    # ============================================================
+    #                           FOOTER
+    # ============================================================
 
-    # ------------------------------------------------------
-    # FOOTER
-    # ------------------------------------------------------
     c.setLineWidth(0.4)
     c.line(x_margin, 60, width - x_margin, 60)
 
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(x_margin, 45, "Generated automatically by SRP OMS")
-    c.drawString(width - 160, 45, "Powered by SRP Automation")
+    c.drawRightString(width - x_margin, 45, "Powered by SRP Automation")
 
+    # Save PDF
     c.save()
     return temp_file.name
 
