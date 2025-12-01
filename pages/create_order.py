@@ -9,6 +9,53 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import urllib.parse
+# ---------------- HIDE STREAMLIT DEFAULT SIDEBAR (100% WORKING) -----------------
+st.markdown("""
+    <style>
+
+    /* Remove Streamlit automatic multipage sidebar */
+    [data-testid="stSidebar"] {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        min-width: 0 !important;
+    }
+
+    /* Remove new sidebar container introduced in 1.36+ */
+    aside, nav[aria-label="Sidebar"], section[aria-label="Sidebar"] {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        min-width: 0 !important;
+    }
+
+    /* Remove any element with 'sidebar' in class/id (future proof) */
+    div[class*="sidebar"], div[id*="sidebar"], div[class*="st-emotion-cache"][class*="sidebar"] {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+    }
+
+    /* Hide hamburger button */
+    button[kind="header"], [data-testid="collapsedControl"], [title="Toggle sidebar"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* Make whole app full width */
+    [data-testid="stAppViewContainer"] {
+        margin-left: 0 !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        width: 100% !important;
+    }
+
+    [data-testid="stToolbar"] { 
+        display: none !important;
+    }
+
+    </style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------
 # CONFIG
