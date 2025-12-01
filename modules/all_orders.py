@@ -18,59 +18,80 @@ except NameError:
 def generate_id():
     return ''.join(random.choices('0123456789abcdef', k=20))
 
-@lru_cache(maxsize=1)
-def fetch_mock_orders():
-    """Generates a list of mock order documents."""
-    st.info("Generating mock data for demonstration purposes...")
-    
-    stages = ['New', 'Processing', 'Packing', 'Storage', 'Dispatch', 'Completed', 'Cancelled']
-    customer_names = ['Alpha Logistics', 'Beta Retailers', 'Gamma Services', 'Delta Supply', 'Epsilon Corp']
-    
-    orders_list = []
-    
-    for i in range(500):
-        order_id = f"ORD-{1000 + i}"
-        customer = random.choice(customer_names)
-        stage = random.choices(stages, weights=[5, 10, 15, 10, 20, 35, 5], k=1)[0]
-        
-        created_at = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(1, 24))
-        processing_at = created_at + timedelta(hours=random.randint(2, 6)) if stage != 'New' else None
-        packing_at = processing_at + timedelta(hours=random.randint(1, 3)) if stage in ['Packing', 'Storage', 'Dispatch', 'Completed', 'Cancelled'] else None
-        
-        storage_at = packing_at + timedelta(hours=random.randint(1, 12)) if stage in ['Storage', 'Dispatch', 'Completed'] and packing_at else None
-        
-        dispatch_at = storage_at + timedelta(hours=random.randint(1, 12)) if stage in ['Dispatch', 'Completed'] and storage_at else None
-        completed_at = dispatch_at + timedelta(hours=random.randint(48, 120)) if stage == 'Completed' and dispatch_at else None
+class FirestoreClient:
+    def __init__(self, app_id):
+        self.app_id = app_id
+        st.cache_data.clear()
 
-        is_on_time = random.random() < 0.90
-        
-        data_quality_score = round(random.uniform(90.0, 100.0), 1)
+    def fetch_orders(self):
+        collection_path = f"artifacts/{self.app_id}/public/data/orders"
+        st.info(f"Attempting to fetch data from Firestore collection: `{collection_path}`")
 
-        item_count = random.randint(1, 15)
-        item_value = round(random.uniform(50.0, 500.0) * item_count, 2)
+        try:
+            # --- REAL FIREBASE DATA FETCHING PLACEHOLDER ---
+            #
+            # If using a Python SDK (e.g., google-cloud-firestore):
+            # from google.cloud import firestore
+            # db = firestore.Client()
+            # docs = db.collection(collection_path).stream()
+            # return [doc.to_dict() for doc in docs]
+            #
+            # --- REMOVE THIS SECTION WHEN REAL SDK IS IMPLEMENTED ---
+            st.warning("Using mock data as a fallback. Implement real Firestore SDK calls in FirestoreClient.fetch_orders().")
+            return self._generate_mock_orders()
+
+        except Exception as e:
+            st.error(f"Failed to connect to Firestore or fetch data: {e}. Falling back to mock data.")
+            return self._generate_mock_orders()
+
+    def _generate_mock_orders(self):
+        stages = ['New', 'Processing', 'Packing', 'Storage', 'Dispatch', 'Completed', 'Cancelled']
+        customer_names = ['Alpha Logistics', 'Beta Retailers', 'Gamma Services', 'Delta Supply', 'Epsilon Corp']
         
-        order = {
-            'id': generate_id(),
-            'order_id': order_id,
-            'customer': customer,
-            'item_count': item_count,
-            'total_value': item_value,
-            'stage': stage,
-            'is_on_time': is_on_time,
-            'data_quality_score': data_quality_score,
-            'created_at': created_at.isoformat(),
-            'processing_started_at': processing_at.isoformat() if processing_at else None,
-            'packing_completed_at': packing_at.isoformat() if packing_at else None,
-            'entered_storage_at': storage_at.isoformat() if storage_at else None,
-            'dispatched_at': dispatch_at.isoformat() if dispatch_at else None,
-            'completed_at': completed_at.isoformat() if completed_at else None,
-        }
-        orders_list.append(order)
+        orders_list = []
         
-    return orders_list
+        for i in range(500):
+            order_id = f"ORD-{1000 + i}"
+            customer = random.choice(customer_names)
+            stage = random.choices(stages, weights=[5, 10, 15, 10, 20, 35, 5], k=1)[0]
+            
+            created_at = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(1, 24))
+            processing_at = created_at + timedelta(hours=random.randint(2, 6)) if stage != 'New' else None
+            packing_at = processing_at + timedelta(hours=random.randint(1, 3)) if stage in ['Packing', 'Storage', 'Dispatch', 'Completed', 'Cancelled'] else None
+            
+            storage_at = packing_at + timedelta(hours=random.randint(1, 12)) if stage in ['Storage', 'Dispatch', 'Completed'] and packing_at else None
+            
+            dispatch_at = storage_at + timedelta(hours=random.randint(1, 12)) if stage in ['Dispatch', 'Completed'] and storage_at else None
+            completed_at = dispatch_at + timedelta(hours=random.randint(48, 120)) if stage == 'Completed' and dispatch_at else None
+
+            is_on_time = random.random() < 0.90
+            
+            data_quality_score = round(random.uniform(90.0, 100.0), 1)
+
+            item_count = random.randint(1, 15)
+            item_value = round(random.uniform(50.0, 500.0) * item_count, 2)
+            
+            order = {
+                'id': generate_id(),
+                'order_id': order_id,
+                'customer': customer,
+                'item_count': item_count,
+                'total_value': item_value,
+                'stage': stage,
+                'is_on_time': is_on_time,
+                'data_quality_score': data_quality_score,
+                'created_at': created_at.isoformat(),
+                'processing_started_at': processing_at.isoformat() if processing_at else None,
+                'packing_completed_at': packing_at.isoformat() if packing_at else None,
+                'entered_storage_at': storage_at.isoformat() if storage_at else None,
+                'dispatched_at': dispatch_at.isoformat() if dispatch_at else None,
+                'completed_at': completed_at.isoformat() if completed_at else None,
+            }
+            orders_list.append(order)
+            
+        return orders_list
 
 def analyze_kpis(data_list):
-    """Calculates key performance indicators from the order data."""
     if not data_list:
         return {}
 
@@ -109,10 +130,11 @@ def analyze_kpis(data_list):
         'active_wip_count': active_wip_count,
     }
 
+@lru_cache(maxsize=1)
 def fetch_and_analyze_data():
-    """Fetches mock data, converts it to DataFrame, and calculates KPIs."""
+    client = FirestoreClient(appId)
     try:
-        data_list = fetch_mock_orders()
+        data_list = client.fetch_orders()
         
         if not data_list:
             return pd.DataFrame(), [], {}
