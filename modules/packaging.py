@@ -13,7 +13,7 @@ st.set_page_config(page_title="Packing Department", page_icon="📦", layout="wi
 if "role" not in st.session_state:
     st.switch_page("pages/login.py")
 
-if st.session_state["role"] not in ["packing", "admin"]:
+if st.session_state["role"] not in ["packaging", "admin"]:
     st.error("❌ You do not have permission to access this page.")
     st.stop()
 
