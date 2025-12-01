@@ -71,73 +71,140 @@ def send_gmail(to, subject, html):
 
 # ---------------------------------------------------
 # PDF GENERATOR
-# ---------------------------------------------------
+
 def generate_order_pdf(data, qr_b64):
+    # Load logo (srplogo.png must exist in same directory)
+    logo_path = "srplogo.png"
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(temp_file.name, pagesize=A4)
+
     width, height = A4
-    y = height - 40
+    x_margin = 40
+    y = height - 50
 
-    c.setFont("Helvetica-Bold", 22)
-    c.drawString(40, y, "Shree Ram Packers – Order Confirmation")
+    # -----------------------------
+    # LOGO + COMPANY HEADER
+    # -----------------------------
+    try:
+        c.drawImage(logo_path, x_margin, y - 60, width=120, preserveAspectRatio=True, mask="auto")
+    except:
+        pass  # Skip if no logo found
+
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(x_margin + 130, y - 20, "Shree Ram Packers")
+
+    c.setFont("Helvetica", 11)
+    c.drawString(x_margin + 130, y - 40, "Industrial Area, India")
+    c.drawString(x_margin + 130, y - 55, "Phone: +91 9896817707")
+    c.drawString(x_margin + 130, y - 70, "Email: screenerpro.ai@gmail.com")
+
+    y -= 100
+
+    # Divider Line
+    c.setLineWidth(1)
+    c.line(x_margin, y, width - x_margin, y)
     y -= 30
-    c.line(40, y, width - 40, y)
+
+    # -----------------------------
+    # ORDER HEADER
+    # -----------------------------
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(x_margin, y, f"Order Confirmation – {data['order_id']}")
+    y -= 20
+
+    c.setFont("Helvetica", 11)
+    c.drawString(x_margin, y, f"Order Type: {data['type']}")
     y -= 30
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(40, y, f"Order ID: {data['order_id']}")
-    y -= 40
+    # -----------------------------
+    # CUSTOMER DETAILS BLOCK
+    # -----------------------------
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(x_margin, y, "Customer Details")
+    y -= 20
 
-    c.setFont("Helvetica", 12)
-    for label, value in [
-        ("Customer", data["customer"]),
+    c.setFont("Helvetica", 11)
+    fields_cust = [
+        ("Customer Name", data["customer"]),
         ("Phone", data["customer_phone"]),
         ("Email", data["customer_email"]),
-        ("Order Type", data["type"]),
+        ("Received Date", data["received"]),
+        ("Due Date", data["due"]),
+    ]
+
+    for label, value in fields_cust:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_margin, y, f"{label}:")
+        c.setFont("Helvetica", 11)
+        c.drawString(x_margin + 150, y, str(value))
+        y -= 18
+
+    y -= 20
+
+    # -----------------------------
+    # ORDER DETAILS TABLE
+    # -----------------------------
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(x_margin, y, "Order Details")
+    y -= 20
+
+    order_fields = [
         ("Product Type", data["product_type"]),
         ("Priority", data["priority"]),
         ("Quantity", data["qty"]),
-        ("Received", data["received"]),
-        ("Due", data["due"]),
-        ("Advance?", data["advance"]),
-        ("Product Description", data["item"]),
-        ("Foil ID", data["foil_id"]),
-        ("Spot UV ID", data["spotuv_id"]),
+        ("Rate (₹)", data["rate"]),
+        ("Advance Received", data["advance"]),
         ("Board Thickness ID", data["board_thickness_id"]),
         ("Paper Thickness ID", data["paper_thickness_id"]),
         ("Size ID", data["size_id"]),
-        ("Rate", data["rate"]),
-    ]:
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(40, y, f"{label}:")
-        c.setFont("Helvetica", 12)
-        c.drawString(200, y, str(value))
-        y -= 22
-        if y < 100:
-            c.showPage()
-            y = height - 40
+        ("Foil ID", data["foil_id"]),
+        ("Spot UV ID", data["spotuv_id"]),
+        ("Description", data["item"]),
+    ]
 
+    c.setFont("Helvetica", 11)
+    for label, value in order_fields:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_margin, y, f"{label}:")
+        c.setFont("Helvetica", 11)
+        c.drawString(x_margin + 150, y, str(value))
+        y -= 18
+
+        if y < 120:
+            c.showPage()
+            y = height - 60
+
+    y -= 20
+
+    # -----------------------------
+    # QR CODE
+    # -----------------------------
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
     qr_temp.close()
-    c.drawImage(qr_temp.name, width - 180, 80, width=130, height=130)
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(width - 180, y + 130, "Scan to Track Order")
+
+    c.drawImage(qr_temp.name, width - 180, y, width=130, height=130)
+
+    y -= 140
+
+    # -----------------------------
+    # FOOTER
+    # -----------------------------
+    c.setLineWidth(1)
+    c.line(x_margin, 60, width - x_margin, 60)
 
     c.setFont("Helvetica-Oblique", 10)
-    c.drawString(40, 40, "Generated automatically by OMS – Shree Ram Packers")
+    c.drawString(x_margin, 45, "Generated automatically by OMS – Shree Ram Packers")
+    c.drawString(width - 160, 45, "Powered by SRP Automation")
 
     c.save()
     return temp_file.name
 
-# ---------------------------------------------------
-# ROLE CHECK
-# ---------------------------------------------------
-if "role" not in st.session_state:
-    st.session_state["role"] = "design"
-
-if st.session_state["role"] not in ["admin", "design"]:
-    st.error("❌ You do not have permission.")
-    st.stop()
 
 # ---------------------------------------------------
 # UI
