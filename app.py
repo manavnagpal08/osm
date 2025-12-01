@@ -66,19 +66,18 @@ def logout():
 # --- Custom CSS Injection ---
 
 def inject_global_css():
-    """Injects common styles for the app and the login-specific styles."""
+    """Injects all global and local styles, optimized for the final beautiful sidebar."""
     
     st.markdown("""
     <style>
-        /* Global App Styling (Post-Login) */
+        /* Global App Styling */
         .stApp {
-            /* Main content area is pure white */
-            background-color: #FFFFFF; 
+            background-color: #FFFFFF; /* Main content area is pure white */
             font-family: 'Poppins', sans-serif;
         }
 
         /* ------------------------------------------------------------- */
-        /* LOGIN SCREEN STYLING: Hidden elements & Background Image */
+        /* LOGIN SCREEN STYLING */
         /* ------------------------------------------------------------- */
         .stApp:has(.login-container) {
             background-image: url('https://images.unsplash.com/photo-1520880867055-1e30d1cb001c');
@@ -87,14 +86,12 @@ def inject_global_css():
             background-attachment: fixed;
             background-color: transparent;
         }
-        
         .stApp:has(.login-container) [data-testid="stHeader"], 
         .stApp:has(.login-container) [data-testid="stToolbar"], 
         .stApp:has(.login-container) [data-testid="stSidebar"] {
             display: none !important;
         }
-
-        /* Login Card Styles */
+        /* Login Card Styles (retained) */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
@@ -110,13 +107,14 @@ def inject_global_css():
         /* ... other login styles remain ... */
         
         /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING (Visibility Fix + Premium Enhancement) */
+        /* ADMIN SIDEBAR STYLING (The Beautiful Enhancement) */
         /* ------------------------------------------------------------- */
         
-        /* Sidebar Container: Dark gradient and strong shadow */
+        /* Sidebar Container: Gradient, strong shadow, and expanded width */
         .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
+            /* Dark Blue Gradient */
             background: linear-gradient(180deg, #2c3e50 0%, #1a242f 100%);
-            box-shadow: 4px 0 20px rgba(0,0,0,0.4); 
+            box-shadow: 4px 0 20px rgba(0,0,0,0.5); /* Even stronger shadow */
             width: 280px !important; 
             min-width: 280px !important; 
             transition: all 0.3s ease-in-out;
@@ -129,62 +127,74 @@ def inject_global_css():
             font-size: 26px; 
             font-weight: 700; 
             text-align: center;
+            /* Gradient Underline */
             border-bottom: 2px solid;
-            border-image: linear-gradient(to right, #2980b9, #1abc9c) 1;
+            border-image: linear-gradient(to right, #3498db, #e74c3c) 1; /* Blue to Red contrast */
             margin-bottom: 25px;
         }
 
         /* Navigation Links Container */
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 15px; }
-
-        /* FIX: Ensure all text within the sidebar radio button is white */
-        [data-testid="stSidebar"] .stRadio label * {
-            color: #FFFFFF !important; /* Force all text elements (including custom span wrappers) to be white */
-        }
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 10px; } 
         
-        /* FIX: Explicitly style the label itself for non-active links */
+        /* FIX: Ensure all text elements are white for contrast */
+        [data-testid="stSidebar"] .stRadio label * {
+            color: #FFFFFF !important; 
+        }
+
+        /* Style the labels (the actual menu items) - Glass/Frosted Effect */
         [data-testid="stSidebar"] .stRadio label {
-            color: #FFFFFF !important; /* Set base text color to White */
+            /* Text set to white above */
             padding: 12px 15px;
-            margin-bottom: 8px; 
-            border-radius: 8px; 
-            transition: all 0.2s ease-in-out; 
+            margin-bottom: 10px; /* Increased spacing */
+            border-radius: 12px; /* Smoother corners */
+            
+            /* Glass/Frosted Look for non-active items */
+            background-color: rgba(255, 255, 255, 0.08); /* Very subtle transparency */
+            border: 1px solid rgba(255, 255, 255, 0.15); /* Light border */
+            
+            transition: all 0.3s ease-in-out; 
             font-weight: 500;
             font-size: 15px;
         }
         
-        /* Hover state: Subtle lift and bright color */
+        /* Hover state: Lifted, brighter color, slight glow */
         [data-testid="stSidebar"] .stRadio label:hover {
-            background-color: rgba(44, 62, 80, 0.4); 
-            color: #f1c40f !important; /* Vibrant yellow/gold for hover text */
-            transform: translateX(5px); 
+            background-color: rgba(255, 255, 255, 0.2); /* Brighter glass look on hover */
+            color: #f1c40f !important; /* Gold text */
+            transform: translateX(3px) scale(1.01); /* Slight slide and subtle scale */
+            box-shadow: 0 4px 15px rgba(241, 196, 15, 0.2); /* Subtle Gold/Yellow glow */
             cursor: pointer;
         }
+        
+        /* FIX for hover text color (must target the inner span) */
+        [data-testid="stSidebar"] .stRadio label:hover * {
+            color: #f1c40f !important; 
+        }
 
-        /* Selected/Checked state: Solid active color */
+        /* Selected/Checked state: Solid, vibrant, and defined */
         [data-testid="stSidebar"] .stRadio input:checked + div > span {
-            background-color: #1abc9c !important; 
+            background-color: #e74c3c !important; /* Secondary color (Red) for active */
             color: white !important; 
-            border-radius: 8px;
+            border-radius: 12px;
             font-weight: 700;
             padding: 12px 15px;
-            box-shadow: 0 4px 10px rgba(26, 188, 156, 0.3);
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4); /* Red glow for active */
         }
-        
-        /* Logout Button Styling */
+
+        /* Logout Button Styling: Prominent and separate */
         [data-testid="stSidebar"] .stButton button {
             width: 90%;
-            margin: 25px 5% 15px 5%;
-            background-color: #e74c3c; 
+            margin: 30px 5% 15px 5%; /* More separation from menu */
+            background-color: #3498db; /* Blue button for logout (less alarming than red) */
             color: white;
             border: none;
             border-radius: 8px;
             font-weight: 600;
-            padding: 10px;
-            transition: background-color 0.2s;
+            padding: 12px;
+            transition: all 0.2s;
         }
         [data-testid="stSidebar"] .stButton button:hover {
-            background-color: #c0392b;
+            background-color: #2980b9;
             transform: scale(1.02);
         }
     </style>
@@ -250,12 +260,12 @@ def admin_sidebar():
     if "admin_menu_choice" not in st.session_state:
         st.session_state.admin_menu_choice = "Create Order"
 
-    # Display options now include emojis and text
     display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
     
     current_key = st.session_state.admin_menu_choice
     current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
     
+    # Simple, custom styled navigation header
     st.sidebar.markdown('<h3 style="color: #ecf0f1; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
     
     choice_with_icon = st.sidebar.radio(
@@ -265,7 +275,6 @@ def admin_sidebar():
         key="admin_radio_menu" 
     )
 
-    # Extract the plain key (text after the emoji)
     choice = " ".join(choice_with_icon.split(" ")[1:])
 
     if choice != st.session_state.admin_menu_choice:
