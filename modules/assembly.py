@@ -278,7 +278,7 @@ with tab1:
             # ==================================
             with col_details:
                 
-                # --- TIME TRACKING & QUANTITY ---
+                # --- TIME TRACKING & QUANTITY (Visible Block) ---
                 col_time, col_qty_info = st.columns(2)
 
                 with col_time:
@@ -335,50 +335,50 @@ with tab1:
 
                 st.markdown("---")
 
-                # --- DETAILS FORM ---
-                st.subheader("🧾 Assembly Details")
+                # --- DETAILS FORM (Now within an Expander for better layout) ---
+                with st.expander("📝 Enter/Edit Assembly Details", expanded=False):
+                    
+                    assembled_qty_input = st.number_input(
+                        "Assembled Quantity",
+                        min_value=0,
+                        max_value=qty,
+                        value=assembled_qty,
+                        key=f"asmqty_{order_id}",
+                        help=f"Total units required: {qty}",
+                        # Ensure the saved value is used if the user hasn't interacted with it yet
+                        # Streamlit handles this state, but we ensure max_value limits input.
+                    )
 
-                assembled_qty_input = st.number_input(
-                    "Assembled Quantity",
-                    min_value=0,
-                    max_value=qty,
-                    value=assembled_qty,
-                    key=f"asmqty_{order_id}",
-                    help=f"Total units required: {qty}",
-                    # Ensure the saved value is used if the user hasn't interacted with it yet
-                    # Streamlit handles this state, but we ensure max_value limits input.
-                )
+                    assign_to = st.text_input(
+                        "Assigned Worker",
+                        o.get("assembly_assigned_to", ""),
+                        key=f"assign_{order_id}",
+                        placeholder="e.g., Rohan / Sameer"
+                    )
 
-                assign_to = st.text_input(
-                    "Assigned Worker",
-                    o.get("assembly_assigned_to", ""),
-                    key=f"assign_{order_id}",
-                    placeholder="e.g., Rohan / Sameer"
-                )
+                    material = st.text_input(
+                        "Material Used",
+                        o.get("assembly_material", ""),
+                        placeholder="e.g., White Glue, Staples, Tape",
+                        key=f"mat_{order_id}"
+                    )
 
-                material = st.text_input(
-                    "Material Used",
-                    o.get("assembly_material", ""),
-                    placeholder="e.g., White Glue, Staples, Tape",
-                    key=f"mat_{order_id}"
-                )
+                    notes = st.text_area(
+                        "Notes for Assembly/Next Stage",
+                        o.get("assembly_notes", ""),
+                        key=f"notes_{order_id}",
+                        height=80
+                    )
 
-                notes = st.text_area(
-                    "Notes for Assembly/Next Stage",
-                    o.get("assembly_notes", ""),
-                    key=f"notes_{order_id}",
-                    height=80
-                )
-
-                if st.button("💾 Save All Details", key=f"save_{order_id}", use_container_width=True, type="secondary"):
-                    update(f"orders/{key}", {
-                        "assembled_qty": int(assembled_qty_input), # Save as integer
-                        "assembly_assigned_to": assign_to,
-                        "assembly_material": material,
-                        "assembly_notes": notes
-                    })
-                    st.toast("Details Updated!")
-                    st.rerun()
+                    if st.button("💾 Save All Details", key=f"save_{order_id}_expander", use_container_width=True, type="secondary"):
+                        update(f"orders/{key}", {
+                            "assembled_qty": int(assembled_qty_input), # Save as integer
+                            "assembly_assigned_to": assign_to,
+                            "assembly_material": material,
+                            "assembly_notes": notes
+                        })
+                        st.toast("Details Updated!")
+                        st.rerun()
             
             # ==================================
             # COLUMN 2: FILES & ACTION
@@ -503,7 +503,7 @@ with tab2:
                 try:
                     comp_dt_utc = datetime.fromisoformat(o.get('assembly_completed_at', ''))
                     IST = timezone(timedelta(hours=5, minutes=30))
-                    if comp_dt_utc.tzinfo is None or comp_dt_utc.tzinfo.utcoffset(comp_dt_utc) is None:
+                    if comp_dt_utc.tzinfo is None or comp_dt_utc.utcoffset(comp_dt_utc) is None:
                         comp_dt_utc = comp_dt_utc.replace(tzinfo=timezone.utc)
                     
                     comp_dt_ist = comp_dt_utc.astimezone(IST).strftime('%Y-%m-%d %H:%M IST')
