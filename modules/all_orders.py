@@ -41,6 +41,7 @@ def calculate_priority_score(row):
     time_to_deadline = row.get('Time_To_Deadline', 100)
     
     if time_to_deadline < 0:
+        # Penalize heavily for each day overdue
         modifier = 100 + abs(time_to_deadline) * 5 
     elif time_to_deadline <= 3:
         modifier = (3 - time_to_deadline) * 2
@@ -135,7 +136,7 @@ def load_and_process_orders():
     # --- Advanced Metric: Time to Deadline ---
     current_time = datetime.now(timezone.utc)
     time_delta = df['due'] - current_time
-    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) 
+    df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1) # Days
 
     # --- Advanced Feature: Priority Score ---
     df['Priority_Score'] = df.apply(calculate_priority_score, axis=1)
@@ -245,14 +246,7 @@ with tab1:
         df_display,
         hide_index=True,
         use_container_width=True,
-        # Apply a simple styling for deadlines
-        column_styler={
-            "Deadline (Days)": st.column_config.NumberColumn(
-                "Deadline (Days)", format="%.1f days",
-                help="Days remaining until the deadline (negative means overdue)",
-                
-            )
-        }
+        # Removed the error-causing 'column_styler' argument
     )
 
 # Tab 2: Pending Orders (Not completed or dispatched)
