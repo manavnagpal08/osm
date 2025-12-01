@@ -3,6 +3,10 @@ from firebase import read, update
 import base64
 from datetime import datetime, timezone, timedelta
 
+# ---------------- FIX PLAN STEP 1: INITIALIZE TAB STATE ----------------
+if "active_logistics_tab" not in st.session_state:
+    st.session_state.active_logistics_tab = 0
+# ---------------- END STEP 1 ----------------
 
 st.set_page_config(page_title="Logistics Department", page_icon="🚚", layout="wide")
 
@@ -49,7 +53,7 @@ def load_orders():
 incoming, storage, dispatch, completed = load_orders()
 
 
-# ---------------- UTILS (REFACTORED) ----------------
+# ---------------- UTILS (REFACTORED FOR QR) ----------------
 def parse_dt(s):
     if not s:
         return None
@@ -67,7 +71,6 @@ def get_qr_raw_data(b64_data):
     if not b64_data:
         return None
     try:
-        # The '===' padding is added for robustness
         return base64.b64decode(b64_data + "===")
     except:
         return None
@@ -85,21 +88,26 @@ def dl_qr(raw_data):
     """Provide download button for QR from raw bytes."""
     if raw_data:
         st.download_button("⬇ Download QR", raw_data, "order_qr.png", "image/png", use_container_width=True)
-    # No warning if data is missing, just no button
 
 
-# ---------------- TABS ----------------
-tab1, tab2, tab3, tab4 = st.tabs([
+# ---------------- FIX PLAN STEP 2: CREATE TABS WITH KEY ----------------
+tab_titles = [
     "📥 Incoming From Assembly",
     "🏬 Storage",
     "🚀 Dispatch Queue",
     "✅ Completed Orders"
-])
+]
+
+# Use the session state variable as the key to ensure state is managed correctly
+tab1, tab2, tab3, tab4 = st.tabs(tab_titles, key="active_logistics_tab")
+# ---------------- END STEP 2 ----------------
+
 
 # ============================================================
-# TAB 1 → INCOMING (Modified QR display)
+# TAB 1 → INCOMING
 # ============================================================
 with tab1:
+    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
 
     st.subheader(f"Incoming Orders From Assembly ({len(incoming)})")
 
@@ -111,6 +119,7 @@ with tab1:
     colA, colB = st.columns([0.2, 0.8])
 
     with colA:
+        # Note: Select All logic relies on the loop below to populate `selected`
         select_all = st.checkbox("Select All")
 
     with colB:
@@ -125,15 +134,20 @@ with tab1:
     # BULK ACTION
     if bulk_action != "None" and selected:
         now = datetime.now(timezone.utc).isoformat()
+        target_tab = st.session_state.active_logistics_tab
 
         for k in selected:
             if bulk_action == "Move Selected to Storage":
                 update(f"orders/{k}", {"stage": "Storage", "storage_started_at": now})
+                target_tab = 1 # Storage tab index
 
             if bulk_action == "Move Selected to Dispatch":
                 update(f"orders/{k}", {"stage": "Dispatch", "storage_completed_at": now})
+                target_tab = 2 # Dispatch tab index
 
         st.success(f"{len(selected)} orders updated.")
+        # FIX PLAN STEP 4: Set next tab before rerun
+        st.session_state.active_logistics_tab = target_tab
         st.rerun()
 
     # ORDER LIST
@@ -145,7 +159,7 @@ with tab1:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
-        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
+        qr_raw = get_qr_raw_data(qr)
 
         assembly_done = parse_dt(o.get("assembly_completed_at"))
 
@@ -171,7 +185,7 @@ with tab1:
                     st.warning("N/A")
 
             with cols[5]:
-                show_qr_inline(qr_raw) # CHANGED
+                show_qr_inline(qr_raw)
 
             b1, b2 = st.columns(2)
 
@@ -180,6 +194,8 @@ with tab1:
                     "stage": "Storage",
                     "storage_started_at": datetime.now(timezone.utc).isoformat()
                 })
+                # FIX PLAN STEP 4: Set next tab before rerun
+                st.session_state.active_logistics_tab = 1
                 st.rerun()
 
             if b2.button("🚀 Move to Dispatch", key=f"to_disp_{key}", use_container_width=True):
@@ -187,13 +203,16 @@ with tab1:
                     "stage": "Dispatch",
                     "storage_completed_at": datetime.now(timezone.utc).isoformat()
                 })
+                # FIX PLAN STEP 4: Set next tab before rerun
+                st.session_state.active_logistics_tab = 2
                 st.rerun()
 
 
 # ============================================================
-# TAB 2 → STORAGE (Modified QR display)
+# TAB 2 → STORAGE
 # ============================================================
 with tab2:
+    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
 
     st.subheader(f"Orders in Storage ({len(storage)})")
 
@@ -208,7 +227,7 @@ with tab2:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
-        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
+        qr_raw = get_qr_raw_data(qr)
 
         started = parse_dt(o.get("storage_started_at"))
         time_in_storage = "N/A"
@@ -227,20 +246,23 @@ with tab2:
             cols[3].metric("Time in Storage", time_in_storage)
 
             with cols[4]:
-                show_qr_inline(qr_raw) # CHANGED
+                show_qr_inline(qr_raw)
 
             if st.button("🚀 Move to Dispatch", key=f"s2d_{key}", use_container_width=True):
                 update(f"orders/{key}", {
                     "stage": "Dispatch",
                     "storage_completed_at": datetime.now(timezone.utc).isoformat()
                 })
+                # FIX PLAN STEP 4: Set next tab before rerun
+                st.session_state.active_logistics_tab = 2
                 st.rerun()
 
 
 # ============================================================
-# TAB 3 → DISPATCH (Modified QR display)
+# TAB 3 → DISPATCH
 # ============================================================
 with tab3:
+    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
 
     st.subheader(f"Pending Dispatch ({len(dispatch)})")
 
@@ -255,7 +277,7 @@ with tab3:
         qty = o.get("qty")
         priority = o.get("priority", "Medium")
         qr = o.get("order_qr")
-        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
+        qr_raw = get_qr_raw_data(qr)
 
         with st.container(border=True):
             cols = st.columns([3, 1, 1, 2])
@@ -265,7 +287,7 @@ with tab3:
             cols[2].metric("Priority", priority)
 
             with cols[3]:
-                show_qr_inline(qr_raw) # CHANGED
+                show_qr_inline(qr_raw)
 
             st.markdown("#### Dispatch Details")
 
@@ -282,7 +304,7 @@ with tab3:
                     "dispatch_notes": notes
                 })
                 st.success("Saved")
-                st.rerun()
+                st.rerun() # Reruns on same tab
 
             if c2.button("🎉 Mark Completed", key=f"done_{key}", use_container_width=True):
                 now = datetime.now(timezone.utc).isoformat()
@@ -293,13 +315,16 @@ with tab3:
                     "dispatch_completed_by": USER
                 })
                 st.balloons()
+                # FIX PLAN STEP 4: Set next tab before rerun
+                st.session_state.active_logistics_tab = 3
                 st.rerun()
 
 
 # ============================================================
-# TAB 4 → COMPLETED (Modified QR display/download)
+# TAB 4 → COMPLETED
 # ============================================================
 with tab4:
+    # FIX PLAN STEP 3: Setting the current index is now handled by the key parameter in st.tabs
 
     st.subheader(f"Completed Orders ({len(completed)})")
 
@@ -315,7 +340,7 @@ with tab4:
         tracking = o.get("tracking_number", "N/A")
         notes = o.get("dispatch_notes", "N/A")
         qr = o.get("order_qr")
-        qr_raw = get_qr_raw_data(qr) # NEW: Decode QR once
+        qr_raw = get_qr_raw_data(qr)
 
         completed_dt = parse_dt(o.get("completed_at"))
         completed_txt = completed_dt.strftime("%Y-%m-%d %H:%M") if completed_dt else "N/A"
@@ -326,13 +351,12 @@ with tab4:
             st.markdown(f"**Completed At:** {completed_txt}")
             st.markdown(f"**Notes:** {notes}")
 
-            if qr_raw: # CHANGED: Check decoded data for presence
-                # Use columns to neatly separate the QR image and download button
+            if qr_raw:
                 c_qr, c_dl = st.columns([1, 4])
                 with c_qr:
-                    show_qr_inline(qr_raw, width=150) # CHANGED: Use raw data
+                    show_qr_inline(qr_raw, width=150)
                 with c_dl:
-                    st.markdown("<br>", unsafe_allow_html=True) # Add spacing
-                    dl_qr(qr_raw)                           # CHANGED: Use raw data
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    dl_qr(qr_raw)
             else:
                 st.warning("QR not available for this order.")
