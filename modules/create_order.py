@@ -14,7 +14,6 @@ from reportlab.pdfgen import canvas
 import tempfile
 from datetime import datetime, timezone, timedelta
 
-
 # ---------------------------------------------------
 # CONFIG
 # ---------------------------------------------------
@@ -29,7 +28,6 @@ GMAIL_PASS = "your_app_password"
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
 
-
 # ---------------------------------------------------
 # QR GENERATOR
 # ---------------------------------------------------
@@ -42,7 +40,6 @@ def generate_qr_base64(order_id: str):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
-
 
 # ---------------------------------------------------
 # WHATSAPP
@@ -59,7 +56,6 @@ def get_whatsapp_link(phone, order_id, customer):
     )
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
-
 
 # ---------------------------------------------------
 # EMAIL
@@ -80,9 +76,8 @@ def send_gmail(to, subject, html):
         st.error(f"Email Error: {e}")
         return False
 
-
 # ---------------------------------------------------
-# PDF GENERATOR  (FINAL VERSION PROVIDED EARLIER)
+# PDF GENERATOR
 # ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
     logo_path = "srplogo.png"
@@ -116,7 +111,7 @@ def generate_order_pdf(data, qr_b64):
     c.setLineWidth(1.4)
     c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
 
-    # Company Name + Tagline
+    # Company Title
     left_block_x = separator_x + 20
     top_y = height - 60
 
@@ -127,7 +122,7 @@ def generate_order_pdf(data, qr_b64):
     c.setFont("Helvetica", 14)
     c.drawString(left_block_x, top_y - 25, "Premium Packaging & Printing Solutions")
 
-    # Contact info under tagline
+    # Contact info
     info_y = top_y - 55
     c.setFont("Helvetica", 12)
     for line in [
@@ -138,9 +133,8 @@ def generate_order_pdf(data, qr_b64):
         c.drawString(left_block_x, info_y, line)
         info_y -= 18
 
-    # Header Divider
+    # Divider
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
-    c.setLineWidth(3)
     c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
 
     c.setFillColorRGB(0, 0, 0)
@@ -197,9 +191,8 @@ def generate_order_pdf(data, qr_b64):
             c.showPage()
             y = height - 80
 
-    y -= 15
-
     # QR Code
+    y -= 15
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
@@ -221,7 +214,6 @@ def generate_order_pdf(data, qr_b64):
     c.save()
     return temp_file.name
 
-
 # ---------------------------------------------------
 # UI
 # ---------------------------------------------------
@@ -231,7 +223,6 @@ all_orders = read("orders") or {}
 customer_list = sorted(list(set(
     o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
 )))
-
 
 # ---------------------------------------------------
 # STEP 1 — CUSTOMER BLOCK
@@ -248,7 +239,6 @@ with box:
         order_type_simple = "New" if order_type.startswith("New") else "Repeat"
 
     with col2:
-        # Maintain persistent fields
         customer_input = st.session_state.get("customer_input", "")
         customer_phone_input = st.session_state.get("customer_phone_input", "")
         customer_email_input = st.session_state.get("customer_email_input", "")
@@ -287,7 +277,6 @@ with box:
             customer_phone_input = st.text_input("Phone", customer_phone_input)
             customer_email_input = st.text_input("Email", customer_email_input)
 
-
 # ---------------------------------------------------
 # STEP 2 — REPEAT ORDER AUTOFILL
 # ---------------------------------------------------
@@ -312,11 +301,10 @@ if order_type_simple == "Repeat" and customer_input:
                     st.success("Auto-fill applied!")
                     break
 
-
 # ---------------------------------------------------
 # STEP 3 — MAIN FORM
 # ---------------------------------------------------
-with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
+with st.form("order_form"):
 
     st.subheader("3️⃣ Order Specification")
     st.divider()
@@ -345,10 +333,13 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
 
     item = st.text_area("Product Description", value=prev.get("item", ""))
 
-    
+    # ---------------------------------------------------
+    # ⭐ FIXED: STORE IN IST FORMAT
+    # ---------------------------------------------------
     IST = timezone(timedelta(hours=5, minutes=30))
     receive_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
     due_date = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+    # ---------------------------------------------------
 
     advance = st.radio("Advance Received?", ["Yes", "No"])
 
@@ -366,7 +357,6 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
 
     if submitted:
 
-        # FIX: Persist values
         customer = customer_input.strip()
         customer_phone = customer_phone_input.strip()
         customer_email = customer_email_input.strip()
@@ -382,8 +372,9 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
         if len("".join(filter(str.isdigit, customer_phone))) < 10:
             st.error("⚠️ Enter a valid phone number.")
             st.stop()
+
         qr_b64 = generate_qr_base64(order_id)
-        
+
         data = {
             "order_id": order_id,
             "customer": customer,
@@ -394,8 +385,14 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
             "priority": priority,
             "item": item,
             "qty": qty,
+
+            # ---------------------------------------------------
+            # ⭐ FIXED: TRUE IST TIMESTAMPS STORED HERE
+            # ---------------------------------------------------
             "received": receive_date,
             "due": due_date,
+            # ---------------------------------------------------
+
             "advance": advance,
             "foil_id": foil,
             "spotuv_id": spotuv,
@@ -419,9 +416,8 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
         st.session_state["last_order_id"] = order_id
         st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone, order_id, customer)
         st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
-        st.session_state["order_created_flag"] = True  # Keep active until new order created
+        st.session_state["order_created_flag"] = True
 
-        # Send Email if needed
         if customer_email:
             html_email = f"""
             <h2>Your Order {order_id} is Created</h2>
@@ -434,9 +430,8 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
 
         st.rerun()
 
-
 # ---------------------------------------------------
-# SUCCESS BLOCK (OUTSIDE FORM)
+# SUCCESS BLOCK
 # ---------------------------------------------------
 if st.session_state.get("order_created_flag"):
 
@@ -454,5 +449,3 @@ if st.session_state.get("order_created_flag"):
     st.image(base64.b64decode(st.session_state["last_qr"]), width=200)
 
     st.markdown(f"[💬 Send via WhatsApp]({st.session_state['last_whatsapp']})")
-
-    # ❌ FIX: Removed the line that cleared the flag.
