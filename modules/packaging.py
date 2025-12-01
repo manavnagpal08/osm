@@ -23,12 +23,13 @@ USER_IDENTITY = st.session_state.get("username", st.session_state["role"])
 st.subheader(f"👋 Logged in as: {USER_IDENTITY} ({st.session_state['role'].title()})")
 
 
-st.title("🚚 Logistics Department (Packing & Dispatch)")
-st.caption("Manage orders through the Packing and Dispatch stages.")
+st.title("🚚 Logistics Department (Packing, Storage & Dispatch)")
+st.caption("Manage orders through the Packing, Storage, and Dispatch stages.")
 
-# ---------------- LOAD ORDERS ----------------
+# ---------------- LOAD ORDERS (UPDATED FOR STORAGE) ----------------
 orders = read("orders") or {}
 pending_packing: Dict[str, Any] = {}
+pending_storage: Dict[str, Any] = {} # <<< ADDED STORAGE
 pending_dispatch: Dict[str, Any] = {}
 completed_final: Dict[str, Any] = {}
 
@@ -40,12 +41,14 @@ for key, o in orders.items():
 
     if stage == "Packing":
         pending_packing[key] = o
+    elif stage == "Storage": # <<< ADDED STAGE CATEGORY
+        pending_storage[key] = o
     elif stage == "Dispatch":
         pending_dispatch[key] = o
     elif stage == "Completed":
         completed_final[key] = o
 
-# --------- SORT BY PRIORITY (Packing & Dispatch) ----------
+# --------- SORT BY PRIORITY (Packing, Storage, & Dispatch) ----------
 priority_rank = {"High": 0, "Medium": 1, "Low": 2}
 
 sorted_packing = sorted(
@@ -56,11 +59,20 @@ sorted_packing = sorted(
     )
 )
 
+# <<< ADDED STORAGE SORTING
+sorted_storage = sorted(
+    pending_storage.items(),
+    key=lambda x: (
+        priority_rank.get(x[1].get("priority", "Medium"), 1),
+        x[1].get("packing_completed_at", "2099-12-31") # Sort by when it arrived from packing
+    )
+)
+
 sorted_dispatch = sorted(
     pending_dispatch.items(),
     key=lambda x: (
         priority_rank.get(x[1].get("priority", "Medium"), 1),
-        x[1].get("packing_completed_at", "2099-12-31") # Sort by when it arrived from packing
+        x[1].get("storage_completed_at", x[1].get("packing_completed_at", "2099-12-31")) # Sort by when it arrived from packing/storage
     )
 )
 
@@ -108,7 +120,18 @@ def detect_file_type(data: Optional[str]):
     """Detects file type from base64 data."""
     if not data:
         return None, None, None
-    raw = base64.b64decode(data)
+    
+    # Pad the string if necessary (fixes common base64 error)
+    if len(data) % 4 != 0:
+        data += '=' * (4 - len(data) % 4)
+        
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except Exception as e:
+        # Handle cases where the base64 string is truly corrupt
+        st.warning(f"File detection failed for base64 data. Error: {e}")
+        return "bin", "application/octet-stream", ".bin"
+        
     header = raw[:10]
     if header.startswith(b"%PDF"): return "pdf", "application/pdf", ".pdf"
     if header.startswith(b"\x89PNG"): return "png", "image/png", ".png"
@@ -120,7 +143,16 @@ def download_button_ui(label: str, b64: Optional[str], order_id: str, fname: str
     if not b64: 
         return
     
-    raw = base64.b64decode(b64)
+    # Pad the string if necessary (fixes common base64 error)
+    if len(b64) % 4 != 0:
+        b64 += '=' * (4 - len(b64) % 4)
+        
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        st.error(f"Error decoding base64 data for {label}. File may be corrupted.")
+        return
+        
     _, mime, ext = detect_file_type(b64)
 
     st.download_button(
@@ -172,6 +204,7 @@ def generate_slip_pdf(o, details, title, fields):
     
     def esc(t):
         t = str(t)
+        # Basic PDF string escaping
         t = t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         return t.encode('ascii', 'replace').decode('ascii')
 
@@ -180,6 +213,7 @@ def generate_slip_pdf(o, details, title, fields):
         pdf_text += f"({esc(ln)}) Tj\n0 -18 Td\n"
     pdf_text += "ET"
     
+    # Minimal PDF structure (Courier font for monospaced text)
     pdf = f"""%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
@@ -209,9 +243,10 @@ startxref
     return pdf.encode("utf-8", errors="ignore")
 
 
-# ---------------- UI: TABS ----------------
-tab1, tab2, tab3 = st.tabs([
+# ---------------- UI: TABS (UPDATED FOR STORAGE) ----------------
+tab1, tab2, tab3, tab4 = st.tabs([
     f"📦 Pending Packing ({len(sorted_packing)})",
+    f"🏬 Storage ({len(pending_storage)})", # <<< NEW TAB
     f"🚀 Pending Dispatch ({len(pending_dispatch)})",
     f"✅ Finalized Orders ({len(completed_final)})"
 ])
@@ -240,14 +275,17 @@ if st.session_state["role"] in ["packaging", "admin"]:
                 if arrived_dt:
                     now_utc = datetime.now(timezone.utc)
                     time_diff = now_utc - arrived_dt
-                    hours_passed = time_diff.total_seconds() / 3600
                     
                     # 36 hours limit for Packing
-                    if hours_passed > 36:
-                        status_message = f"⛔ OVERDUE by **{str(time_diff - timedelta(hours=36)).split('.')[0]}**"
+                    deadline = timedelta(hours=36)
+                    
+                    if time_diff > deadline:
+                        overdue_by = time_diff - deadline
+                        status_message = f"⛔ OVERDUE by **{str(overdue_by).split('.')[0]}**"
                         status_type = st.error
                     else:
-                        status_message = f"🟢 Remaining: **{str(timedelta(hours=36) - time_diff).split('.')[0]}**"
+                        remaining_time = deadline - time_diff
+                        status_message = f"🟢 Remaining: **{str(remaining_time).split('.')[0]}**"
                         status_type = st.success
                 else:
                     status_message = "Cannot calculate deadline (Time Format Error)"
@@ -258,15 +296,18 @@ if st.session_state["role"] in ["packaging", "admin"]:
             current_material = st.session_state.get(f"p_material_{order_id}", o.get("packing_material", ""))
             current_notes = st.session_state.get(f"p_notes_{order_id}", o.get("packing_notes", ""))
 
-            # --- QR CODE (JSON ENCODED) ---
+            # --- QR CODE (USING STORED QR CODE) ---
+            # FIX: Use the QR code saved during order creation
+            qr_b64 = o.get("order_qr") 
+            
+            # Prepare audit JSON for display (not for QR generation)
             qr_json_data = {
                 "order_id": order_id, "customer": o.get("customer"), "item": o.get("item"),
                 "qty": o.get("qty"), "priority": o.get("priority"), "stage": "Packing",
                 "assign_to": current_assign, "material_used": current_material,
-                "next_stage": "Dispatch", "timestamp": datetime.now(timezone.utc).isoformat()
+                "next_stage": "Storage", "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            json_text = json.dumps(qr_json_data)
-            qr_b64 = generate_qr_base64(json_text)  
+            json_text = json.dumps(qr_json_data, indent=2)
 
             with st.container(border=True):
                 # ---- HEADER ----
@@ -289,7 +330,6 @@ if st.session_state["role"] in ["packaging", "admin"]:
                     # Time Tracking
                     if not start:
                         if st.button("▶️ Start Packing", key=f"p_start_{order_id}", use_container_width=True, type="secondary"):
-                            # LOG USER WHO STARTED THE TASK
                             update(f"orders/{key}", {
                                 "packing_start": datetime.now(timezone.utc).isoformat(),
                                 "packing_started_by": USER_IDENTITY
@@ -297,7 +337,6 @@ if st.session_state["role"] in ["packaging", "admin"]:
                             st.rerun()
                     elif not end:
                         if st.button("⏹ End Packing", key=f"p_end_{order_id}", use_container_width=True, type="primary"):
-                            # LOG USER WHO ENDED THE TASK
                             update(f"orders/{key}", {
                                 "packing_end": datetime.now(timezone.utc).isoformat(),
                                 "packing_ended_by": USER_IDENTITY
@@ -316,10 +355,13 @@ if st.session_state["role"] in ["packaging", "admin"]:
 
                     # QR Code & Slip
                     st.subheader("🔳 QR Code Tag")
-                    st.image(base64.b64decode(qr_b64), width=200) 
-                    with st.expander(f"View Encoded JSON Data ({len(json_text)} bytes)"):
-                        st.code(json_text, language="json")
-                    download_button_ui("⬇ Download QR Code (PNG)", base64.b64decode(qr_b64), order_id, "packing_QR", key)
+                    if qr_b64:
+                        st.image(base64.b64decode(qr_b64), width=200) # Use the stored QR
+                        with st.expander(f"View Audit JSON Data"):
+                            st.code(json_text, language="json")
+                        download_button_ui("⬇ Download Order QR (PNG)", qr_b64, order_id, "order_QR", key)
+                    else:
+                        st.error("QR Code Missing. Please check the order creation.")
                     
                     st.markdown("---")
 
@@ -347,7 +389,6 @@ if st.session_state["role"] in ["packaging", "admin"]:
                 # COLUMN 2: DETAILS & ACTION
                 with col_details:
                     st.subheader("📋 Packing Details")
-                    # This field remains free-form for delegation/assignment
                     assign = st.text_input("Assigned To (User ID/Name)", current_assign, key=f"p_assign_{order_id}") 
                     material = st.text_input("Material Used", current_material, key=f"p_material_{order_id}")
                     notes = st.text_area("Notes", current_notes, height=80, key=f"p_notes_{order_id}")
@@ -383,45 +424,96 @@ if st.session_state["role"] in ["packaging", "admin"]:
 
                     st.divider()
                     
-                    # --- MOVE TO DISPATCH ---
+                    # --- MOVE TO STORAGE (UPDATED NEXT STAGE) ---
                     is_time_ended = bool(end)
                     is_file_uploaded = bool(packing_file)
                     is_ready = is_time_ended and is_file_uploaded
 
                     if is_ready:
-                        if st.button("🚀 Move to Dispatch", key=f"p_next_{order_id}", type="primary", use_container_width=True):
+                        if st.button("🏬 Move to Storage", key=f"p_next_{order_id}", type="primary", use_container_width=True):
                             now = datetime.now(timezone.utc).isoformat()
                             update(f"orders/{key}", {
-                                "stage": "Dispatch",
+                                "stage": "Storage", # <<< MOVED TO STORAGE
                                 "packing_completed_at": now 
                             })
-                            st.success("✅ Order moved to Dispatch!")
+                            st.success("✅ Order moved to Storage queue!")
                             st.balloons()
                             st.rerun()
                     else:
-                        st.error("⚠ **ORDER NOT READY TO MOVE TO DISPATCH**")
+                        st.error("⚠ **ORDER NOT READY TO MOVE TO STORAGE**")
                         missing_items = []
                         if not is_time_ended: missing_items.append("⏹ End Packing Time")
                         if not is_file_uploaded: missing_items.append("📁 Upload Final Output/Proof File")
                         st.markdown("**Please complete:**<br>- " + "<br>- ".join(missing_items), unsafe_allow_html=True)
 
 # =================================================================
-# TAB 2: PENDING DISPATCH
+# TAB 2: STORAGE (NEW TAB)
+# =================================================================
+if st.session_state["role"] in ["packaging", "dispatch", "admin"]:
+    with tab2:
+        st.header("🏬 Orders in Storage")
+        st.caption("Orders awaiting retrieval for dispatch.")
+        
+        if not sorted_storage:
+            st.success("🎉 No orders currently in storage!")
+        
+        for key, o in sorted_storage:
+            order_id = o["order_id"]
+            
+            with st.container(border=True):
+                # ---- HEADER ----
+                col_id, col_priority, col_time = st.columns([3, 1.5, 3])
+                col_id.markdown(f"### 📦 Order {order_id}")
+                col_id.caption(f"**Customer:** {o.get('customer')} | **Item:** {o.get('item')}")
+                col_priority.metric("Priority", o.get("priority", "Medium"))
+                
+                arrived_str = o.get("packing_completed_at")
+                if arrived_str:
+                    arrived_dt = parse_datetime_robust(arrived_str)
+                    if arrived_dt:
+                        time_in_storage = datetime.now(timezone.utc) - arrived_dt
+                        col_time.metric("Time in Storage", str(time_in_storage).split('.')[0])
+                    else:
+                        col_time.info("Time of arrival missing.")
+                
+                st.divider()
+
+                st.markdown("##### Packing Audit Details")
+                st.markdown(f"""
+                - **Packed By:** `{o.get("packing_ended_by", "N/A")}`
+                - **Material Used:** `{o.get("packing_material", "N/A")}`
+                - **Notes:** `{o.get("packing_notes", "None")}`
+                """)
+                
+                # --- ACTION: MOVE TO DISPATCH ---
+                st.markdown("---")
+                if st.button("🚀 Pull for Dispatch", key=f"s_next_{order_id}", type="primary", use_container_width=True):
+                    now = datetime.now(timezone.utc).isoformat()
+                    update(f"orders/{key}", {
+                        "stage": "Dispatch",
+                        "storage_completed_at": now # Track time out of storage
+                    })
+                    st.success("✅ Order moved to Dispatch queue!")
+                    st.rerun()
+
+
+# =================================================================
+# TAB 3: PENDING DISPATCH (Previously Tab 2)
 # =================================================================
 if st.session_state["role"] in ["dispatch", "admin"]:
-    with tab2:
+    with tab3: # <<< UPDATED TAB NUMBER
         if not sorted_dispatch:
             st.success("🎉 No pending dispatch work!")
-            st.stop()
-
+        
         for key, o in sorted_dispatch:
             order_id = o["order_id"]
             start = o.get("dispatch_start")
             end = o.get("dispatch_end")
             
-            # --- DEADLINE WATCH (48 hours from Packing Completion) ---
-            arrived_str = o.get("packing_completed_at")
-            status_message = "Waiting for Packing completion timestamp."
+            # --- DEADLINE WATCH (48 hours from Packing/Storage Completion) ---
+            # Use storage_completed_at first, then packing_completed_at
+            arrived_str = o.get("storage_completed_at") or o.get("packing_completed_at")
+            status_message = "Waiting for previous stage completion timestamp."
             status_type = st.info
             
             if arrived_str:
@@ -431,12 +523,14 @@ if st.session_state["role"] in ["dispatch", "admin"]:
                     time_diff = now_utc - arrived_dt
                     
                     # 48 hours for dispatch
-                    if time_diff.total_seconds() > 48 * 3600:
-                        remaining_time = time_diff - timedelta(hours=48)
+                    deadline = timedelta(hours=48)
+                    
+                    if time_diff > deadline:
+                        remaining_time = time_diff - deadline
                         status_message = f"⛔ OVERDUE by **{str(remaining_time).split('.')[0]}**"
                         status_type = st.error
                     else:
-                        remaining_time = timedelta(hours=48) - time_diff
+                        remaining_time = deadline - time_diff
                         status_message = f"🟢 Remaining: **{str(remaining_time).split('.')[0]}**"
                         status_type = st.success
                 else:
@@ -448,15 +542,18 @@ if st.session_state["role"] in ["dispatch", "admin"]:
             current_tracking = st.session_state.get(f"d_tracking_{order_id}", o.get("tracking_number", ""))
             current_notes = st.session_state.get(f"d_notes_{order_id}", o.get("dispatch_notes", ""))
 
-            # --- QR CODE (JSON ENCODED) ---
+            # --- QR CODE (USING STORED QR CODE) ---
+            # FIX: Use the QR code saved during order creation
+            qr_b64 = o.get("order_qr") 
+            
+            # Prepare audit JSON for display (not for QR generation)
             qr_json_data = {
                 "order_id": order_id, "customer": o.get("customer"), "item": o.get("item"),
                 "qty": o.get("qty"), "priority": o.get("priority"), "stage": "Dispatch",
                 "courier": current_courier, "tracking": current_tracking,
                 "next_stage": "Completed", "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            json_text = json.dumps(qr_json_data)
-            qr_b64 = generate_qr_base64(json_text)  
+            json_text = json.dumps(qr_json_data, indent=2) 
 
             with st.container(border=True):
                 # ---- HEADER ----
@@ -479,7 +576,6 @@ if st.session_state["role"] in ["dispatch", "admin"]:
                     # Time Tracking
                     if not start:
                         if st.button("▶️ Start Dispatch", key=f"d_start_{order_id}", use_container_width=True, type="secondary"):
-                            # LOG USER WHO STARTED THE TASK
                             update(f"orders/{key}", {
                                 "dispatch_start": datetime.now(timezone.utc).isoformat(),
                                 "dispatch_started_by": USER_IDENTITY
@@ -487,7 +583,6 @@ if st.session_state["role"] in ["dispatch", "admin"]:
                             st.rerun()
                     elif not end:
                         if st.button("⏹ End Dispatch", key=f"d_end_{order_id}", use_container_width=True, type="primary"):
-                            # LOG USER WHO ENDED THE TASK
                             update(f"orders/{key}", {
                                 "dispatch_end": datetime.now(timezone.utc).isoformat(),
                                 "dispatch_ended_by": USER_IDENTITY
@@ -506,10 +601,13 @@ if st.session_state["role"] in ["dispatch", "admin"]:
 
                     # QR Code & Slip
                     st.subheader("🔳 QR Code Tag")
-                    st.image(base64.b64decode(qr_b64), width=200) 
-                    with st.expander(f"View Encoded JSON Data ({len(json_text)} bytes)"):
-                        st.code(json_text, language="json")
-                    download_button_ui("⬇ Download QR Code (PNG)", base64.b64decode(qr_b64), order_id, "dispatch_QR", key)
+                    if qr_b64:
+                        st.image(base64.b64decode(qr_b64), width=200) # Use the stored QR
+                        with st.expander(f"View Audit JSON Data"):
+                            st.code(json_text, language="json")
+                        download_button_ui("⬇ Download Order QR (PNG)", qr_b64, order_id, "order_QR", key)
+                    else:
+                        st.error("QR Code Missing. Please check the order creation.")
                     
                     st.markdown("---")
 
@@ -561,12 +659,11 @@ if st.session_state["role"] in ["dispatch", "admin"]:
                     if is_ready:
                         if st.button("🎉 Mark Order Completed", key=f"d_final_{order_id}", type="primary", use_container_width=True):
                             now = datetime.now(timezone.utc).isoformat()
-                            # LOG USER WHO FINALLY COMPLETED THE DISPATCH STEP
                             update(f"orders/{key}", {
                                 "stage": "Completed",
                                 "completed_at": now, 
                                 "dispatch_completed_at": now,
-                                "dispatch_completed_by": USER_IDENTITY # New audit field
+                                "dispatch_completed_by": USER_IDENTITY
                             })
                             st.success("✅ Order marked as COMPLETED and dispatched!")
                             st.balloons()
@@ -580,9 +677,9 @@ if st.session_state["role"] in ["dispatch", "admin"]:
 
 
 # =================================================================
-# TAB 3: FINALIZED ORDERS
+# TAB 4: FINALIZED ORDERS (Previously Tab 3)
 # =================================================================
-with tab3:
+with tab4: # <<< UPDATED TAB NUMBER
     if not completed_final:
         st.info("No orders have been finalized yet.")
         st.stop()
