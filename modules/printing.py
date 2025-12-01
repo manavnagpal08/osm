@@ -2,6 +2,7 @@ import streamlit as st
 from firebase import read, update
 import base64
 from datetime import datetime
+import pytz
 
 st.set_page_config(page_title="Printing Department", layout="wide", page_icon="🖨️")
 
@@ -17,6 +18,20 @@ if st.session_state["role"] not in ["printing", "admin"]:
 
 st.title("🖨️ Printing Department")
 st.caption("Manage print jobs, preview artwork, and upload mockup files.")
+
+# ========================================================
+# TIME HELPERS — IST FORMAT
+# ========================================================
+IST = pytz.timezone("Asia/Kolkata")
+
+def now_ist_raw():
+    """Returns ISO datetime string in IST timezone."""
+    return datetime.now(IST).isoformat()
+
+def now_ist_formatted():
+    """Returns human-readable format: 01 Dec 2025, 4:20 PM"""
+    return datetime.now(IST).strftime("%d %b %Y, %I:%M %p")
+
 
 # ---------------------------
 # LOAD ORDERS
@@ -36,13 +51,18 @@ for key, o in orders.items():
         completed[key] = o
 
 # ---------------------------
-# FILE DOWNLOAD HANDLER
+# FILE UTILITIES
 # ---------------------------
-def file_download_button(label, b64_data, order_id, file_label, key_prefix):
-    """DOWNLOAD WORKS FOR PDF / JPG / PNG"""
-    if not b64_data:
-        st.warning("No file available.")
+
+def file_download_button(label, file_entry, order_id, file_label, key_prefix):
+    """Handles file download using the file entry dictionary."""
+    if not file_entry or not file_entry.get("data"):
+        st.warning("No file available for download.")
         return
+    
+    # Extract Base64 data and extension from the file entry dictionary
+    b64_data = file_entry.get("data")
+    file_ext = file_entry.get("ext", "bin") # Use stored extension, default to bin
 
     try:
         raw = base64.b64decode(b64_data)
@@ -50,28 +70,19 @@ def file_download_button(label, b64_data, order_id, file_label, key_prefix):
         st.error("File decode failed!")
         return
 
-    header = raw[:10]
+    # Determine MIME type based on the stored extension
+    mime_map = {
+        "pdf":  "application/pdf",
+        "jpg":  "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png":  "image/png",
+        "ai":   "application/postscript",
+        "zip":  "application/zip"
+    }
 
-    # Detect PDF
-    if header.startswith(b"%PDF"):
-        ext = ".pdf"
-        mime = "application/pdf"
-
-    # Detect PNG
-    elif header.startswith(b"\x89PNG"):
-        ext = ".png"
-        mime = "image/png"
-
-    # Detect JPG
-    elif header[0:3] == b"\xff\xd8\xff":
-        ext = ".jpg"
-        mime = "image/jpeg"
-
-    else:
-        ext = ".bin"
-        mime = "application/octet-stream"
-
-    filename = f"{order_id}_{file_label}{ext}"
+    mime = mime_map.get(file_ext.lower(), "application/octet-stream")
+    
+    filename = f"{order_id}_{file_label}.{file_ext}"
 
     st.download_button(
         label=label,
@@ -82,28 +93,29 @@ def file_download_button(label, b64_data, order_id, file_label, key_prefix):
         use_container_width=True
     )
 
-# ---------------------------
-# FILE PREVIEW HANDLER
-# ---------------------------
-def preview_file(label, b64_data):
-    """Preview PDF / PNG / JPG inline."""
-    if not b64_data:
-        st.warning(f"{label} not uploaded yet.")
+def preview_file(label, file_entry):
+    """Preview PDF / PNG / JPG inline using the file entry dictionary."""
+    if not file_entry or not file_entry.get("data"):
+        st.info(f"Awaiting **{label}** upload.")
         return
 
+    b64_data = file_entry.get("data")
     raw = base64.b64decode(b64_data)
     header = raw[:10]
 
     st.markdown(f"### 📄 {label} Preview")
 
-    # Preview image
-    if header.startswith(b"\x89PNG") or header[:3] == b"\xff\xd8\xff":
+    # Preview image (PNG/JPG detection)
+    if header.startswith(b"\x89PNG") or header[0:3] == b"\xff\xd8\xff":
         st.image(raw, use_container_width=True)
 
-    # Preview pdf
+    # Indicate PDF
     elif header.startswith(b"%PDF"):
-        st.markdown("PDF detected. Use download button to open it.")
+        st.info("PDF detected. Use the **Download** button to open it in full.")
 
+    else:
+        st.warning("File type not suitable for inline preview (AI, ZIP, etc.).")
+    
     return raw
 
 # ---------------------------
@@ -130,8 +142,8 @@ with tab1:
 
             with st.container(border=True):
 
-                st.subheader(f"🖨️ Order {order_id}")
-                st.markdown(f"**Customer:** {o.get('customer')} — **Item:** {o.get('item')}")
+                st.subheader(f"🖨️ Order {order_id} — {o.get('customer')}")
+                st.markdown(f"**Item:** {o.get('item')} | **Quantity:** {o.get('qty')}")
 
                 st.divider()
 
@@ -141,20 +153,22 @@ with tab1:
                 # PRINT READY FILE (from Design)
                 # ----------------------------
                 with col1:
-                    st.subheader("🎨 Print-Ready File (from Design)")
+                    st.subheader("🎨 Print-Ready File (Final Art)")
 
-                    ready = design_files.get("final")
-                    if not ready:
-                        st.error("❌ Final design file missing!")
+                    # Final art is stored as a dictionary in design_files
+                    final_art_entry = design_files.get("final") 
+                    
+                    if not final_art_entry:
+                        st.error("❌ Final design file missing! Cannot proceed.")
                     else:
-                        preview_file("Print Ready File", ready)
+                        preview_file("Print Ready File", final_art_entry)
 
                         file_download_button(
                             "⬇️ Download Print Ready File",
-                            ready,
+                            final_art_entry, # Pass the dictionary entry
                             order_id,
                             "print_ready",
-                            "dl_ready"
+                            f"dl_ready_{key}" # Unique key
                         )
 
                 # ----------------------------
@@ -164,34 +178,36 @@ with tab1:
                     st.subheader("🖼️ Upload Mockup File")
 
                     upload = st.file_uploader(
-                        "Upload mockup", 
+                        "Upload finished product mockup (JPG, PNG, PDF)", 
                         type=["png", "jpg", "jpeg", "pdf"], 
-                        key=f"mockup_{order_id}"
+                        key=f"mockup_upload_{key}" # Unique key
                     )
+                    
+                    mock_b64 = mockup_files.get("mockup")
+                    
+                    if st.button("💾 Save Mockup", key=f"save_mockup_{key}", use_container_width=True, disabled=not upload):
+                        if upload:
+                            upload.seek(0)
+                            encoded = base64.b64encode(upload.read()).decode()
+                            ext = upload.name.split(".")[-1].lower()
+                            
+                            new_mockup_entry = {"data": encoded, "ext": ext}
 
-                    if st.button("💾 Save Mockup", key=f"save_mockup_{order_id}", use_container_width=True) and upload:
-                        encoded = base64.b64encode(upload.read()).decode()
+                            update(f"orders/{key}", {"printing_mockups": {"mockup": new_mockup_entry}})
 
-                        existing = o.get("printing_mockups", {})
-                        existing["mockup"] = encoded
-
-                        update(f"orders/{key}", {"printing_mockups": existing})
-
-                        st.success("Mockup saved!")
-                        st.rerun()
+                            st.success("Mockup saved!")
+                            st.rerun()
 
                     # Show existing mockup preview
-                    mock_b64 = mockup_files.get("mockup")
                     if mock_b64:
-                        st.markdown("### Mockup Preview")
                         preview_file("Mockup", mock_b64)
 
                         file_download_button(
                             "⬇️ Download Mockup File",
-                            mock_b64,
+                            mock_b64, # Pass the dictionary entry
                             order_id,
                             "mockup",
-                            "dl_mock"
+                            f"dl_mock_{key}" # Unique key
                         )
 
                 st.divider()
@@ -199,13 +215,13 @@ with tab1:
                 # ----------------------------
                 # COMPLETE PRINTING
                 # ----------------------------
-                if st.button(f"🚀 Move to Lamination", key=f"done_{order_id}", type="primary", use_container_width=True):
+                if st.button(f"🚀 Move to Lamination", key=f"done_{key}", type="primary", use_container_width=True):
 
-                    now = datetime.now().isoformat()
+                    now_raw = now_ist_raw()
 
                     update(f"orders/{key}", {
                         "stage": "Lamination",
-                        "printing_completed_at": now
+                        "printing_completed_at": now_raw
                     })
 
                     st.balloons()
@@ -235,28 +251,34 @@ with tab2:
 
                 col1, col2 = st.columns(2)
 
+                # Print Ready File Preview (Completed)
                 with col1:
                     st.subheader("Print Ready File")
-                    if design_files.get("final"):
-                        preview_file("Print Ready File", design_files["final"])
+                    final_art_entry = design_files.get("final")
+                    
+                    if final_art_entry:
+                        preview_file("Print Ready File", final_art_entry)
                         file_download_button(
                             "⬇️ Download Print Ready File",
-                            design_files["final"],
+                            final_art_entry, # Pass the dictionary entry
                             order_id,
                             "print_ready",
-                            "comp_dl_ready"
+                            f"comp_dl_ready_{key}" # Unique key
                         )
 
+                # Mockup File Preview (Completed)
                 with col2:
                     st.subheader("Mockup File")
-                    if mockup_files.get("mockup"):
-                        preview_file("Mockup", mockup_files["mockup"])
+                    mockup_entry = mockup_files.get("mockup")
+                    
+                    if mockup_entry:
+                        preview_file("Mockup", mockup_entry)
                         file_download_button(
                             "⬇️ Download Mockup File",
-                            mockup_files["mockup"],
+                            mockup_entry, # Pass the dictionary entry
                             order_id,
                             "mockup",
-                            "comp_dl_mock"
+                            f"comp_dl_mock_{key}" # Unique key
                         )
 
                 st.divider()
