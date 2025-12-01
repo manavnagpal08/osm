@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-# Assuming 'firebase' module handles connection (read, update, delete)
 from firebase import read, update, delete 
 from datetime import datetime, timezone, date, timedelta
 import time
 import numpy as np 
+from dateutil import parser # Use dateutil for robust date parsing
 
 # --- CONFIGURATION ---
 DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
@@ -24,12 +24,12 @@ def to_datetime_utc(x):
     if not x:
         return None
     try:
-        dt = datetime.fromisoformat(str(x).replace('Z', '+00:00'))
+        # Use dateutil.parser for robust parsing of various formats
+        dt = parser.isoparse(str(x).replace('Z', '+00:00'))
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
-        # Return None or a known invalid value if conversion fails
         return None
 
 def calculate_priority_score(row):
@@ -40,7 +40,6 @@ def calculate_priority_score(row):
     score_map = {"High": 3, "Medium": 2, "Low": 1}
     base_score = score_map.get(row.get('priority', 'Low'), 1)
     
-    # Use .get() and provide a safe default value if the column is missing/empty
     time_to_deadline = row.get('Time_To_Deadline', 100)
     
     if time_to_deadline < 0:
@@ -53,7 +52,7 @@ def calculate_priority_score(row):
     return base_score + modifier
 
 # ------------------------------------------------------------------------------------
-# STICKY FILTER LOGIC (Query Params)
+# STICKY FILTER AND SELECTION LOGIC (Query Params)
 # ------------------------------------------------------------------------------------
 
 def get_sticky_filter_state(key, default_value):
@@ -74,18 +73,24 @@ def set_sticky_filter_state(key, value):
     except Exception as e:
         pass
 
+def set_selected_order(firebase_id):
+    """Sets the selected order ID in the query parameters."""
+    set_sticky_filter_state("selected_order_id", firebase_id)
+    # Rerunning immediately to load the editor form
+    st.rerun()
+
 # ------------------------------------------------------------------------------------
 # ADMIN ACCESS & PAGE SETUP
 # ------------------------------------------------------------------------------------
 
-st.set_page_config(page_title="🔥 Advanced Orders Admin Panel (Read-Only)", layout="wide") 
+st.set_page_config(page_title="🔥 Productive Orders Admin Panel", layout="wide") 
 
 if "role" not in st.session_state or st.session_state["role"] != "admin":
     st.error("❌ Access Denied — Admin Only")
     st.stop()
 
 # ------------------------------------------------------------------------------------
-# LOAD & PRE-PROCESS ORDERS (The source of the error is stabilized here)
+# LOAD & PRE-PROCESS ORDERS 
 # ------------------------------------------------------------------------------------
 
 @st.cache_data(ttl=60)
@@ -122,48 +127,33 @@ def load_and_process_orders():
         "Completed": "dispatch_completed_at", 
     }
 
-    # Data Quality: Robust conversion for ALL time fields.
     all_time_keys = list(set(stage_times.values()) | set(['due']))
     
     for key in all_time_keys:
         if key in df.columns:
-            # Errors='coerce' converts bad strings to pd.NaT
             df[key] = pd.to_datetime(df[key].apply(to_datetime_utc), utc=True, errors='coerce')
         else:
-            # Add missing timestamp columns filled with NaT to prevent key errors later
             df[key] = pd.NaT 
 
-    # Prepare columns for the display 
     df["Qty"] = df.get('qty', pd.Series()).fillna(0).astype(int)
-    
-    # Convert Timestamp to a Python date object for display compatibility
     df["Due_Date"] = df['due'].dt.date.replace({pd.NaT: None})
     
-    # --- Advanced Metric: Time to Deadline ---
     current_time = datetime.now(timezone.utc)
     time_delta = df['due'] - current_time
-    # Safely convert timedelta to days, coercing errors to NaT, then filling NaT for score calc
     df['Time_To_Deadline'] = (time_delta.dt.total_seconds() / (24 * 3600)).round(1).fillna(100) 
 
-    # --- Advanced Feature: Priority Score ---
     df['Priority_Score'] = df.apply(calculate_priority_score, axis=1)
 
-    # Calculate Time-In-Stage
     for i in range(1, len(production_stages)):
         prev_stage = production_stages[i-1]
-        
         start_col = stage_times.get(prev_stage)
         end_col = stage_times.get(production_stages[i])
 
         if start_col in df.columns and end_col in df.columns:
-            # CRITICAL FIX: Ensure NaT handling in subtraction. Result is Timedelta or NaT.
             duration_timedelta = (df[end_col] - df[start_col])
-            # The .dt accessor is safe here because duration_timedelta is guaranteed to be timedelta64[ns]
             duration_seconds = duration_timedelta.dt.total_seconds().fillna(0)
             df[f"{prev_stage}_duration_hours"] = (duration_seconds / 3600).round(2)
 
-
-    # Final step: Ensure the Firebase ID column exists, as it is needed for other functions
     if 'firebase_id' not in df.columns:
          df['firebase_id'] = np.nan
         
@@ -171,6 +161,62 @@ def load_and_process_orders():
 
 
 df, stage_times, production_stages = load_and_process_orders()
+
+# ------------------------------------------------------------------------------------
+# ACTION FUNCTIONS
+# ------------------------------------------------------------------------------------
+
+def quick_advance_stage(current_firebase_id, current_stage):
+    """Advances an order to the next stage and logs the timestamp."""
+    
+    # 1. Determine the next stage
+    current_index = production_stages.index(current_stage)
+    if current_index < len(production_stages) - 1:
+        next_stage = production_stages[current_index + 1]
+    else:
+        # Already at the last stage ("Completed")
+        st.warning(f"Order is already at the final stage: {current_stage}")
+        return
+
+    # 2. Prepare update data
+    timestamp_key = stage_times.get(next_stage)
+    update_data = {
+        "stage": next_stage,
+        # Log the timestamp for the *completion* of the current stage
+        timestamp_key: get_current_firebase_time_str()
+    }
+
+    # 3. Update Firebase
+    update(f"orders/{current_firebase_id}", update_data)
+    
+    st.toast(f"✅ Advanced order to **{next_stage}**! Timestamp logged.", icon='⏩')
+    st.cache_data.clear() 
+    # Clear the selection to refresh the table
+    set_sticky_filter_state("selected_order_id", "") 
+    st.rerun()
+
+def save_order_updates(firebase_id, order_id, new_priority, new_qty, new_due_date):
+    """Saves bulk updates to Firebase using the safe single-item approach."""
+    update_data = {
+        'priority': new_priority,
+        'qty': int(new_qty),
+    }
+
+    # Handle Date conversion
+    if new_due_date:
+        try:
+            # Convert date object to datetime object at the end of the day, set to UTC
+            dt_obj = datetime(new_due_date.year, new_due_date.month, new_due_date.day, 23, 59, 59, tzinfo=timezone.utc)
+            update_data['due'] = dt_obj.isoformat().replace('+00:00', 'Z')
+        except Exception:
+            st.error(f"Invalid date format for order {order_id}. Date not updated.")
+            return
+
+    update(f"orders/{firebase_id}", update_data)
+    st.toast(f"💾 Updated Order ID: {order_id} details.", icon='⚙️')
+    st.cache_data.clear() 
+    set_sticky_filter_state("selected_order_id", "")
+    st.rerun()
 
 # ------------------------------------------------------------------------------------
 # PAGE LAYOUT START
@@ -183,9 +229,8 @@ if df.empty:
     st.warning("No orders found in the system.")
     st.stop()
     
-## 🎯 Key Performance Indicators
+# --- KPI BLOCK ---
 col1, col2, col3, col4, col5 = st.columns(5)
-
 col1.metric("**Total Orders**", len(df))
 col2.metric("**Completed Orders**", len(df[df["stage"] == "Completed"]))
 col3.metric("**Active Orders**", len(df[df["stage"] != "Completed"]), 
@@ -196,7 +241,7 @@ col5.metric("**Avg Priority Score**", f"{df['Priority_Score'].mean():.1f}")
 
 st.markdown("---")
 
-## 🔍 Order Filtering (Sticky Filters)
+# --- FILTERING ---
 with st.expander("Filter Options"):
     c1, c2 = st.columns(2)
 
@@ -232,10 +277,9 @@ if df_filtered.empty:
 
 # Select columns for display (Read-only)
 df_display = df_filtered[[
-    "order_id", "customer", "customer_phone", "item", "Qty", 
-    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score" 
+    "order_id", "customer", "item", "Qty", 
+    "stage", "priority", "Due_Date", "Time_To_Deadline", "Priority_Score", "firebase_id"
 ]].rename(columns={
-    "customer_phone": "Phone",
     "order_id": "Order ID",
     "customer": "Customer",
     "item": "Item",
@@ -243,25 +287,118 @@ df_display = df_filtered[[
     "priority": "Priority",
     "Time_To_Deadline": "Deadline (Days)",
     "Priority_Score": "Score",
+    "firebase_id": "Firebase ID" # Used for selection lookup
 })
 
-# ------------------------------------------------------------------------------------
-## 📋 Orders Table Spaces (Read-Only)
-# ------------------------------------------------------------------------------------
-st.markdown("## 📋 Order Management Spaces")
+# --- ORDER SELECTION AND EDIT FORM ---
+selected_order_id = get_sticky_filter_state("selected_order_id", None)
 
+if selected_order_id:
+    # Safely retrieve the selected row using the Firebase ID
+    selected_row = df_display[df_display['Firebase ID'] == selected_order_id]
+    
+    if not selected_row.empty:
+        selected_row_data = selected_row.iloc[0]
+        st.markdown(f"## 🛠️ Edit & Advance Order: **{selected_row_data['Order ID']}**")
+        st.info(f"Current Stage: **{selected_row_data['Stage']}** | Customer: **{selected_row_data['Customer']}**")
+        
+        # --- Form for bulk edit ---
+        with st.form("edit_order_form", clear_on_submit=False):
+            col_e1, col_e2, col_e3 = st.columns(3)
+            
+            new_priority = col_e1.selectbox(
+                "Priority",
+                ["High", "Medium", "Low"],
+                index=["High", "Medium", "Low"].index(selected_row_data['Priority']),
+                key="edit_priority"
+            )
+            new_qty = col_e2.number_input(
+                "Quantity (Qty)",
+                min_value=0,
+                value=int(selected_row_data['Qty']),
+                key="edit_qty"
+            )
+            new_due_date = col_e3.date_input(
+                "Due Date",
+                value=selected_row_data['Due_Date'],
+                key="edit_due_date"
+            )
+
+            c_actions, c_cancel = st.columns([3, 1])
+            
+            # Save Button
+            if c_actions.form_submit_button("💾 Save All Changes (Priority, Qty, Date)", type="primary"):
+                save_order_updates(
+                    selected_order_id, 
+                    selected_row_data['Order ID'], 
+                    new_priority, 
+                    new_qty, 
+                    new_due_date
+                )
+            
+            # Cancel Button
+            if c_cancel.form_submit_button("❌ Cancel Edit", type="secondary"):
+                set_sticky_filter_state("selected_order_id", "") 
+                st.rerun()
+
+        # --- Quick Stage Advance Button ---
+        st.markdown("### Quick Actions")
+        
+        if st.button("⏩ Advance to Next Stage", help="Move the order one step forward and log the time.", type="warning"):
+            quick_advance_stage(selected_order_id, selected_row_data['Stage'])
+
+        st.markdown("---")
+
+    else:
+        # Clear selected ID if it no longer exists (e.g., deleted or filter changed)
+        set_sticky_filter_state("selected_order_id", "") 
+        st.rerun()
+
+# --- DISPLAY ORDERS (Now used for selection) ---
+
+# Prepare table for display and selection (dropping the Firebase ID but keeping index)
+df_selectable = df_display.drop(columns=['Firebase ID'])
+
+st.markdown("## 📋 Order Management Spaces (Click any row to Edit)")
+
+# Use a tabs structure for better organization
 tab1, tab2, tab3 = st.tabs(["**All Filtered Orders**", "**Pending Orders** ⏳", "**Stored Products** 📦"])
 
-# Tab 1: All Filtered Orders
-with tab1:
-    st.markdown("### All Orders (Filtered View)")
-    st.dataframe(
-        df_display,
+# Function to render selectable DataFrame
+def render_selectable_dataframe(df_to_render, key_suffix=""):
+    """Renders a dataframe and handles row selection using session state."""
+    
+    # Drop Firebase ID before passing to selectbox/dataframe
+    df_render = df_to_render.drop(columns=['Firebase ID'])
+    
+    # Streamlit's selection is robust and returns a safe index list based on the displayed data.
+    selected_indices = st.dataframe(
+        df_render,
         hide_index=True,
         use_container_width=True,
+        key=f"data_frame_{key_suffix}",
+        selection_mode="single-row",
+        column_order=df_render.columns.tolist() # Maintain column order consistency
+    )
+    
+    # Check if a row was selected
+    if selected_indices and selected_indices['selection']:
+        # Get the positional index (0-based) of the selected row in df_render
+        position = selected_indices['selection']['rows'][0]
+        
+        # Use the positional index to safely retrieve the Firebase ID from the original df_to_render
+        selected_firebase_id = df_to_render.iloc[position]['Firebase ID']
+        set_selected_order(selected_firebase_id)
+
+
+with tab1:
+    st.markdown("### All Orders (Filtered View)")
+    # Sort by Score (descending) by default to show urgent orders first
+    render_selectable_dataframe(
+        df_display.sort_values(by="Score", ascending=False), 
+        key_suffix="all"
     )
 
-# Tab 2: Pending Orders (Not completed or dispatched)
 with tab2:
     st.markdown("### Pending Production Orders")
     df_pending = df_display[~df_display['Stage'].isin(['Completed', 'Dispatch'])]
@@ -269,13 +406,11 @@ with tab2:
     if df_pending.empty:
         st.info("🎉 No outstanding orders currently in production!")
     else:
-        st.dataframe(
+        render_selectable_dataframe(
             df_pending.sort_values(by="Score", ascending=False),
-            hide_index=True,
-            use_container_width=True,
+            key_suffix="pending"
         )
 
-# Tab 3: Stored Products (In the storage stage)
 with tab3:
     st.markdown("### Products Ready for Dispatch (Storage)")
     df_stored = df_display[df_display['Stage'] == 'Storage']
@@ -283,10 +418,9 @@ with tab3:
     if df_stored.empty:
         st.info("📦 No products currently awaiting pickup or dispatch in storage.")
     else:
-        st.dataframe(
+        render_selectable_dataframe(
             df_stored.sort_values(by="Due_Date", ascending=True),
-            hide_index=True,
-            use_container_width=True,
+            key_suffix="stored"
         )
 
 st.markdown("---")
