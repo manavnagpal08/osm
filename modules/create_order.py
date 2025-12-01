@@ -399,6 +399,7 @@ with st.form("order_form"):     # 🔥 FIXED: removed clear_on_submit=True
             "size_id": size,
             "rate": rate,
             "stage": "Design",
+            "order_qr": qr_b64,
         }
 
         push("orders", data)
