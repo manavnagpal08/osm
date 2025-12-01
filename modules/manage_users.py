@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 # Assuming the firebase module provides read, update, and delete functions
-from firebase import read, update, delete 
+# The 'delete' function is temporarily commented out due to the import error.
+from firebase import read, update 
 
 # --- Constants ---
 USER_ROLES = [
@@ -21,7 +22,8 @@ def load_users():
         # Read all documents under the 'users' collection
         users_data = read("users") 
         if not users_data:
-            return pd.DataFrame() # Return empty DataFrame if no users are found
+            # Check if there's any user data at all. We will rely on the main app logic to handle the default admin
+            return pd.DataFrame() 
 
         # Convert the dictionary of users (keyed by username) into a list of dicts
         users_list = []
@@ -55,19 +57,20 @@ def create_user(username, password, role):
     st.session_state["refresh_users"] = True # Trigger refresh
     return True
 
-def delete_user_by_username(username):
-    """Deletes a user document by username."""
-    # Ensure the default admin cannot be deleted
-    if username.lower() == "admin":
-        st.error("The default 'admin' user cannot be deleted.")
-        return
+# NOTE: Deletion functionality is temporarily commented out until 'delete' function is available in firebase.py
+# def delete_user_by_username(username):
+#     """Deletes a user document by username."""
+#     # Ensure the default admin cannot be deleted
+#     if username.lower() == "admin":
+#         st.error("The default 'admin' user cannot be deleted.")
+#         return
 
-    try:
-        delete(f"users/{username}")
-        st.success(f"User '{username}' deleted successfully.")
-        st.session_state["refresh_users"] = True # Trigger refresh
-    except Exception as e:
-        st.error(f"Failed to delete user {username}: {e}")
+#     try:
+#         delete(f"users/{username}")
+#         st.success(f"User '{username}' deleted successfully.")
+#         st.session_state["refresh_users"] = True # Trigger refresh
+#     except Exception as e:
+#         st.error(f"Failed to delete user {username}: {e}")
 
 # --- Layout and UI Functions ---
 
@@ -151,26 +154,11 @@ def render_manage_table(df_users):
             st.rerun()
 
     st.markdown("---")
-    st.subheader("❌ Delete Users")
+    st.subheader("❌ Delete Users (Unavailable)")
     
-    # A separate section for deletion, as it is a permanent action
-    st.markdown("Select a user to delete (cannot be undone).")
+    # A separate section for deletion, showing it's unavailable
+    st.error("User deletion is unavailable. Please ensure the `delete` function is implemented in `firebase.py`.")
     
-    # Create a list of usernames for deletion selector
-    usernames = df_users['Username'].tolist()
-    if usernames:
-        user_to_delete = st.selectbox("Select User to Delete", usernames, key="delete_user_select")
-        
-        if user_to_delete and st.button(f"Permanently Delete {user_to_delete}", type="primary"):
-            # Use a confirmation box instead of alert()
-            confirm_delete = st.warning(f"Are you absolutely sure you want to delete user **{user_to_delete}**? This cannot be undone.", icon="⚠️")
-            
-            # Use a dummy button inside the warning container for confirmation
-            col_d1, col_d2 = st.columns([1, 4])
-            with col_d1:
-                if st.button("Yes, Delete User", key="confirm_delete_btn"):
-                    delete_user_by_username(user_to_delete)
-                    st.rerun()
 
 
 # --- Main Application Logic ---
