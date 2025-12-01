@@ -1,6 +1,58 @@
 import streamlit as st
 import os
-from firebase import read, update  # Assuming these custom functions are available
+import json
+
+# ----------------------------------------
+# FIREBASE MODULE ACCESS & INITIALIZATION
+# ----------------------------------------
+
+# We must ensure the Firebase SDK functions are available and initialized, 
+# as this file will be executed after a successful login (from login.py)
+
+try:
+    # Check for required functions in globals and assign them.
+    initializeApp = st.globals.get('initializeApp')
+    getFirestore = st.globals.get('getFirestore')
+    collection = st.globals.get('collection')
+    doc = st.globals.get('doc')
+    getDoc = st.globals.get('getDoc')
+    # Note: 'update' function will be replaced by setDoc/updateDoc
+    
+    if not initializeApp:
+        # Fallback for environments where st.globals isn't the primary access method
+        from firebase import initializeApp, getFirestore, collection, doc, getDoc 
+
+except Exception:
+    # If standard imports also fail, we must assume the environment is not ready
+    st.error("FATAL ERROR: Essential Firebase SDK functions (getFirestore, etc.) are unavailable.")
+    st.stop()
+
+
+# Re-initialize the app components safely for module access
+appId = locals().get('__app_id', 'default-app-id')
+config_str = locals().get('__firebase_config', '{}')
+
+try:
+    firebaseConfig = json.loads(config_str)
+except json.JSONDecodeError:
+    st.error("Configuration error: Invalid Firebase config JSON in app.py.")
+    st.stop()
+
+# Initialize if not already initialized by the preceding script (login.py)
+try:
+    app = initializeApp(firebaseConfig)
+    db = getFirestore(app)
+except Exception as e:
+    st.error(f"Error initializing Firebase in app.py: {e}")
+    st.stop()
+
+# Define the common collection path helper
+def get_users_collection():
+    """Returns the reference to the public 'users' collection."""
+    # Path: /artifacts/{appId}/public/data/users
+    path = f"artifacts/{appId}/public/data/users"
+    return collection(db, path)
+
 
 # --- DEBUG: Start of App ---
 st.write("--- DEBUG: APP START ---")
@@ -22,28 +74,35 @@ DEFAULT_ADMIN = {
 
 
 # ---------------------------------------------------------
-# GET USER FROM FIREBASE
+# GET USER FROM FIRESTORE (FIXED)
 # ---------------------------------------------------------
 def get_user(username):
     # --- DEBUG: get_user called ---
     st.write(f"DEBUG: get_user called for username: {username}")
     
-    # NOTE: This uses custom 'read' function. If your 'login.py' uses Firestore SDK, 
-    # there is a system-wide path mismatch here which may cause errors.
-    fb_user = read(f"users/{username}")
-
-    st.write(f"DEBUG: Firebase read result type: {type(fb_user)}")
-
-    if isinstance(fb_user, dict):
-        st.write(f"DEBUG: User found in Firebase with role: {fb_user.get('role')}")
-        return fb_user
-
+    # 1. Check if the requested user is the fallback default admin
     if username == DEFAULT_ADMIN["username"]:
         st.write("DEBUG: Using DEFAULT_ADMIN fallback.")
         return DEFAULT_ADMIN
 
-    st.write("DEBUG: User not found in Firebase or as default admin.")
-    return None
+    # 2. Try fetching from Firebase Firestore
+    try:
+        users_ref = get_users_collection()
+        doc_ref = doc(users_ref, username)
+        doc_snapshot = getDoc(doc_ref)
+
+        if doc_snapshot.exists:
+            user_data = doc_snapshot.to_dict()
+            st.write(f"DEBUG: User found in Firebase with role: {user_data.get('role')}")
+            return user_data
+        
+        st.write("DEBUG: User not found in Firestore.")
+        return None
+
+    except Exception as e:
+        st.error(f"Error reading user from database: {e}")
+        st.write(f"DEBUG: Firestore read failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------
@@ -156,12 +215,13 @@ def department_router():
     st.write(f"DEBUG: Department router activated for role: {role}")
 
     page_map = {
-        # Note: I've updated 'design' to 'design.py' for consistency with the admin menu.
         "design": "design.py",
         "printing": "printing.py",
         "diecut": "diecut.py",
         "assembly": "assembly.py",
         "packaging": "packaging.py",
+        # Added 'lamination' for completeness as it appeared in manage_users.py
+        "lamination": "lamination.py" 
     }
 
     file = page_map.get(role)
@@ -171,7 +231,7 @@ def department_router():
     if file:
         load_page(file)
     else:
-        st.error("No page assigned to your role.")
+        st.error(f"No page assigned to your role ({role}).")
 
 
 # ---------------------------------------------------------
