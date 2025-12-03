@@ -11,14 +11,19 @@ import base64
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
-    initial_sidebar_state="collapsed" 
+    # Removed initial_sidebar_state="collapsed" so the CSS can control the behavior
 )
 # --------------------------------------------------------
-# 🔔 ROUTE: Receive FCM token from frontend (admin only)
+# 🔔 ROUTE: Receive FCM token from frontend (admin only) - Kept for compatibility
 # --------------------------------------------------------
 try:
     params = st.experimental_get_query_params()
-    if "upload_admin_token" in params:
+    # This route is now handled securely AFTER login check in the main flow
+    # but the initial quick exit is kept here in case of a direct unauthenticated POST
+    if "upload_admin_token" in params and st.request.method == 'POST':
+        # NOTE: This block is usually unreachable or will throw an error 
+        # because st.request.body is not reliably available outside a custom HTTP handler
+        # in standard Streamlit deployment. The secure handling is placed later.
         raw = st.request.body.decode()
         update("admin_tokens", {"token": raw})
         st.write("Token saved")
@@ -48,6 +53,7 @@ DEPARTMENT_PAGE_MAP = {
 
 def get_user(username):
     """Retrieves user data from Firebase or returns the default admin."""
+    # NOTE: Assuming 'firebase.read' is a working function defined elsewhere
     try:
         fb_user = read(f"users/{username}") 
         if isinstance(fb_user, dict) and "password" in fb_user and "role" in fb_user:
@@ -72,7 +78,8 @@ def load_page(page_file):
                 code = compile(f.read(), full_path, "exec")
                 exec(code, globals())
         except Exception as e:
-            st.error(f"Error loading page **{page_file}**: {e}")
+            # Displaying the file path helps debugging
+            st.error(f"Error loading page **{page_path}** in modules folder: {e}")
     else:
         st.error(f"Page module not found: **{page_file}** (Expected in the 'modules/' folder)")
 
@@ -86,7 +93,7 @@ def logout():
 # --- Custom CSS Injection ---
 
 def inject_global_css():
-    """Injects all global and local styles, optimized for the standard size and ultimate beautiful sidebar."""
+    """Injects all global and local styles, optimized for the standard size, ultimate beautiful sidebar, and mobile collapsibility."""
     
     st.markdown("""
     <style>
@@ -110,7 +117,9 @@ def inject_global_css():
         
         .stApp:has(.login-container) [data-testid="stHeader"], 
         .stApp:has(.login-container) [data-testid="stToolbar"], 
-        .stApp:has(.login-container) [data-testid="stSidebar"] {
+        .stApp:has(.login-container) [data-testid="stSidebar"],
+        /* Hide the hamburger button on the login screen */
+        .stApp:has(.login-container) .mobile-menu-btn {
             display: none !important;
         }
 
@@ -126,8 +135,8 @@ def inject_global_css():
             padding: 40px;
             border-radius: 16px;
             width: 380px;
-            margin: auto; /* Removed fixed margin-top */
-            margin-top: 140px; /* Re-added margin-top for vertical position */
+            margin: auto; 
+            margin-top: 140px; 
             box-shadow: 0 4px 40px rgba(0,0,0,0.4);
             border: 1px solid rgba(255,255,255,0.3);
             text-align: left;
@@ -149,7 +158,7 @@ def inject_global_css():
         .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
             box-shadow: 4px 0 25px rgba(0,0,0,0.7);
-            /* Standard Sidebar Size */
+            /* Standard Sidebar Size for Desktop */
             width: 250px !important; 
             min-width: 250px !important; 
             transition: all 0.3s ease-in-out;
@@ -157,9 +166,9 @@ def inject_global_css():
         
         /* Sidebar Header/Title Styling */
         .sidebar-header {
-            padding: 25px 15px 10px 15px; /* Reduced padding for size */
+            padding: 25px 15px 10px 15px; 
             color: #f6f9fc;
-            font-size: 24px; /* Reduced size for 250px width */
+            font-size: 24px; 
             font-weight: 800;
             text-align: center;
             /* Gradient Underline */
@@ -170,19 +179,19 @@ def inject_global_css():
         }
 
         /* Navigation Links Container */
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } /* Reduced horizontal padding */
+        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } 
         
         /* FIX: Ensure all text elements are white/light for contrast, and add text shadow */
         [data-testid="stSidebar"] .stRadio label * {
             color: #f6f9fc !important;
-            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); /* Subtle text shadow */
+            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); 
         }
 
         /* Style the labels (the actual menu items) - Frosted Glass Look */
         [data-testid="stSidebar"] .stRadio label {
-            padding: 12px 15px; /* Adjusted padding */
+            padding: 12px 15px; 
             margin-bottom: 6px; 
-            border-radius: 8px; /* Slightly smaller radius for 250px width */
+            border-radius: 8px; 
             
             /* Frosted Look */
             background-color: rgba(255, 255, 255, 0.05);
@@ -232,6 +241,77 @@ def inject_global_css():
         [data-testid="stSidebar"] .stButton button:hover {
             background-color: #00BFFF;
             transform: scale(1.02);
+        }
+
+        /* ------------------------------------------------------------- */
+        /* 📱 MOBILE COLLAPSIBLE SIDEBAR (Hamburger Menu) - NEW */
+        /* ------------------------------------------------------------- */
+
+        @media (max-width: 768px) {
+            
+            /* Hamburger button visible only on mobile */
+            .mobile-menu-btn {
+                position: fixed;
+                top: 15px;
+                left: 15px;
+                font-size: 28px;
+                padding: 8px 14px;
+                background: #1f2833;
+                color: white;
+                border-radius: 6px;
+                z-index: 20000 !important;
+                cursor: pointer;
+                display: block; /* Show on mobile */
+                box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+                transition: transform 0.3s;
+                line-height: 1; /* Fix vertical alignment of ☰ */
+            }
+
+            /* Initially hide sidebar (collapsed) */
+            [data-testid="stSidebar"] {
+                transform: translateX(-260px) !important;
+                transition: all 0.35s ease-in-out;
+                position: fixed !important;
+                top: 0;
+                left: 0;
+                height: 100vh;
+                z-index: 15000 !important;
+            }
+
+            /* When body has 'sidebar-open' class, move sidebar into view */
+            body.sidebar-open [data-testid="stSidebar"] {
+                transform: translateX(0) !important;
+            }
+            
+            /* Add an overlay to the main content when sidebar is open to block clicks */
+            body.sidebar-open .block-container::before {
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5); /* Semi-transparent black */
+                z-index: 10000; 
+                pointer-events: auto; /* Allow clicks on overlay to close */
+            }
+
+            /* Ensure main content full width when closed on mobile */
+            .stMainBlockContainer {
+                margin-left: 0 !important;
+            }
+            
+            /* Hide the default Streamlit hamburger on mobile */
+            [data-testid="stSidebarToggleButton"] {
+                display: none;
+            }
+        }
+        
+        /* Ensure the custom button is hidden on desktop */
+        @media (min-width: 769px) {
+             .mobile-menu-btn {
+                display: none; 
+            }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -313,6 +393,7 @@ def admin_sidebar():
     
     st.sidebar.markdown('<h3 style="color: #f6f9fc; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
     
+    # Use st.radio for the navigation menu
     choice_with_icon = st.sidebar.radio(
         "", 
         display_options,
@@ -320,12 +401,15 @@ def admin_sidebar():
         key="admin_radio_menu" 
     )
 
+    # Extract the original key (e.g., "Create Order") from the icon-prefixed string
     choice = " ".join(choice_with_icon.split(" ")[1:])
 
+    # Check if the selection has changed to load the new page and rerun
     if choice != st.session_state.admin_menu_choice:
           st.session_state.admin_menu_choice = choice
           st.rerun() 
 
+    # Load the selected page
     _, file = ADMIN_MENU[st.session_state.admin_menu_choice]
     load_page(file)
     
@@ -340,10 +424,16 @@ def department_router():
     
     role = st.session_state.get("role")
     
-    with st.container(border=True):
-        st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
-        st.markdown("Please manage your assigned orders below.")
+    # The header is now the main content
+    st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
+    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
+    st.markdown("---")
+
+    col_btn, col_spacer = st.columns([0.2, 0.8])
+    with col_btn:
         st.button("Logout", on_click=logout) 
+
+    st.markdown("Please manage your assigned orders below.")
 
     file = DEPARTMENT_PAGE_MAP.get(role)
 
@@ -357,26 +447,28 @@ def department_router():
 def main_app():
     """Main function to handle post-login routing."""
     
-    # Title is now visible in the main content area, since the Streamlit header is hidden
-    st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
-    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
-    st.markdown("---")
-
     # Routing based on role
     if st.session_state["role"] == "admin":
+        
+        # Title is now visible in the main content area for ADMIN
+        st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
+        st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
+        st.markdown("---")
+        
         admin_sidebar()
+        
     elif st.session_state["role"] in DEPARTMENT_PAGE_MAP:
+        # Departmental users get their specialized router/page
         department_router()
+        
     else:
+        # Fallback for unrecognized roles
         st.error(f"Your role **{st.session_state['role']}** is not authorized to view any page. Please contact administration.")
         st.button("Logout", on_click=logout) 
 
 # --- Main Execution Flow ---
 
-# Inject CSS styles first
-inject_global_css()
-
-# 🔥 Inject CSS only once — before routing
+# 🔥 Inject CSS styles first
 inject_global_css()
 
 # ---------------------------------------------------------
@@ -389,21 +481,43 @@ if "role" not in st.session_state:
     st.stop()
 
 # ---------------------------------------------------------
-# 🔥 PART 2 — Securely handle FCM token route
-# (Only admin + only after login)
+# 🚀 If logged in → Add Hamburger Button + handle main application
+# ---------------------------------------------------------
+
+# ✅ STEP 1: Add Hamburger Button for Mobile UX
+# This HTML/JS trick toggles the 'sidebar-open' class on the body
+st.markdown("""
+    <div class="mobile-menu-btn" onclick="
+        document.body.classList.toggle('sidebar-open');
+        let btn = this;
+        // Optionally change icon from ☰ (Unicode: &#9776;) to X (Unicode: &times;)
+        if (document.body.classList.contains('sidebar-open')) {
+            btn.innerHTML = '&times;'; 
+        } else {
+            btn.innerHTML = '&#9776;';
+        }
+    ">
+        &#9776; </div>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 🔥 PART 2 — Securely handle FCM token route (after login)
 # ---------------------------------------------------------
 params = st.experimental_get_query_params()
 if "upload_admin_token" in params and st.session_state.get("role") == "admin":
     try:
+        # NOTE: This only works with a custom Streamlit frontend component 
+        # or if deployed in a specific environment that supports request body.
         raw = st.request.body.decode()
+        # Assuming 'update' is a working Firebase function
         update("admin_tokens", {"token": raw})
         st.success("Admin device token saved!")
     except Exception as e:
-        st.error(f"Error saving token: {e}")
+        # Catch error if request body is not available/decode fails
+        st.error(f"Error saving token or request body not found: {e}")
     st.stop()
 
 # ---------------------------------------------------------
 # 🚀 If logged in → go to main application
 # ---------------------------------------------------------
 main_app()
-
