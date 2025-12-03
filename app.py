@@ -10,9 +10,8 @@ import base64
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
-    # CRITICAL: We explicitly collapse the sidebar to ensure it's removed from the layout 
-    # since we are no longer using it for navigation.
-    initial_sidebar_state="collapsed"
+    # Use 'expanded' state to ensure sidebar is open by default on desktop
+    initial_sidebar_state="expanded" 
 )
 # --------------------------------------------------------
 # 🔔 ROUTE: Receive FCM token from frontend (admin only) 
@@ -85,7 +84,7 @@ def logout():
 # --- Custom CSS Injection ---
 
 def inject_global_css():
-    """Injects styles for the login screen and hides the default Streamlit elements."""
+    """Restores the background image, dark sidebar theme, and styles the main page dropdown."""
     
     st.markdown("""
     <style>
@@ -96,10 +95,10 @@ def inject_global_css():
         }
 
         /* ------------------------------------------------------------- */
-        /* LOGIN SCREEN STYLING */
+        /* LOGIN SCREEN STYLING (Background Image Restored) */
         /* ------------------------------------------------------------- */
         .stApp:has(.login-container) {
-            background-image: url('https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh9JgbXkHFD_68MIoMrl8sOeanj-iPFaeHPB8IaMYuwcAsNAstm3ZYY9i33sPe4BKe-iwexUYISoCen0ZBS08VV_JZG1R9Wszjv3yEyAL1BBZBn4xTarqdVloKEq9BLR6PNaBp47ao4ZdopDD3oVN1A0GIkNL0ijwB7R1eLKAYGv8LKht52gryczc57bUtS/s320/greb.png');
+            background-image: url('https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh9JgbXkHFD_68MIoMrl8sOeanj-iPFaeHPB8IaMYuwcAsNAstm3ZYY9i33sPe4BKe-iwexUYISoCen0ZBSO8VV_JZG1R9Wszjv3yEyAL1BBZBn4xTarqdVloKEq9BLR6PNaBp47ao4ZdopDD3oVN1A0GIkNL0ijwB7R1eLKAYGv8LKht52gryczc57bUtS/s320/greb.png');
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -108,7 +107,6 @@ def inject_global_css():
         
         .stApp:has(.login-container) [data-testid="stHeader"], 
         .stApp:has(.login-container) [data-testid="stToolbar"], 
-        /* Ensure sidebar is hidden on login page */
         .stApp:has(.login-container) [data-testid="stSidebar"] {
             display: none !important;
         }
@@ -141,15 +139,43 @@ def inject_global_css():
         }
         
         /* ------------------------------------------------------------- */
-        /* DROP DOWN MENU STYLING (Optional Aesthetic improvements) */
+        /* 🎨 SIDEBAR THEME STYLING (Restored Dark/Blue Design) */
         /* ------------------------------------------------------------- */
         
-        /* Ensure the selectbox label is prominent */
-        .stSelectbox label {
+        /* Sidebar Container: Dark gradient theme, always visible on desktop */
+        .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
+            box-shadow: 4px 0 25px rgba(0,0,0,0.7);
+            width: 250px !important; 
+            min-width: 250px !important; 
+        }
+        
+        /* Sidebar Header/Title Styling */
+        .sidebar-header {
+            padding: 25px 15px 10px 15px; 
+            color: #f6f9fc;
+            font-size: 24px; 
+            font-weight: 800;
+            text-align: center;
+            border-bottom: 2px solid;
+            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
+            margin-bottom: 25px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        }
+
+        /* Sidebar content text color */
+        [data-testid="stSidebar"] * {
+            color: #f6f9fc !important;
+        }
+        
+        /* ------------------------------------------------------------- */
+        /* 📝 MAIN PAGE DROP DOWN STYLING (For Admin Navigation) */
+        /* ------------------------------------------------------------- */
+        
+        .nav-selectbox-container .stSelectbox label {
             font-size: 18px;
             font-weight: 600;
-            color: #1f2833; /* Dark text for contrast */
-            margin-bottom: 5px;
+            color: #1f2833 !important; /* Use dark text on the main page */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -194,12 +220,10 @@ def login_screen():
 
         st.markdown("</div>", unsafe_allow_html=True) 
 
-# ------------------------------------------------------------
-# 🗑️ Removed admin_sidebar() function
-# ------------------------------------------------------------
+# --- Admin Navigation (On Main Screen) ---
 
-def admin_navigation_dropdown():
-    """Displays the navigation dropdown and handles page routing for admin users."""
+def admin_navigation_dropdown_on_main():
+    """Displays the on-screen navigation dropdown and handles page routing for admin users."""
     
     ADMIN_MENU = {
         "Create Order": ("📦", "create_order.py"),
@@ -217,17 +241,23 @@ def admin_navigation_dropdown():
     display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
     
     if "admin_menu_choice_key" not in st.session_state:
-        # Default to the first option key
         st.session_state.admin_menu_choice_key = "Create Order"
 
-    # Find the current selection based on the stored key
-    default_index = list(ADMIN_MENU.keys()).index(st.session_state.admin_menu_choice_key)
+    try:
+        current_key = st.session_state.admin_menu_choice_key
+        default_index = list(ADMIN_MENU.keys()).index(current_key)
+    except ValueError:
+        default_index = 0
+        current_key = "Create Order" # Reset to default if key is invalid
+        st.session_state.admin_menu_choice_key = current_key
+
     
-    # --- Navigation Bar Layout ---
+    # --- Navigation Bar Layout on Main Screen ---
+    st.markdown('<div class="nav-selectbox-container">', unsafe_allow_html=True)
     nav_col, logout_col = st.columns([0.8, 0.2])
     
     with nav_col:
-        # Create the dropdown menu
+        # Create the dropdown menu on the main screen
         choice_with_icon = st.selectbox(
             "Select Department/Page:", 
             options=display_options,
@@ -236,25 +266,30 @@ def admin_navigation_dropdown():
             label_visibility="visible"
         )
         
-        # Extract the original key (e.g., "Create Order") from the icon-prefixed string
+        # Extract the original key (e.g., "Create Order")
         choice = " ".join(choice_with_icon.split(" ")[1:])
         
         # If the selection changes, update the state and rerun
-        if choice != st.session_state.admin_menu_choice_key:
+        if choice != current_key:
               st.session_state.admin_menu_choice_key = choice
               st.rerun() 
               
     with logout_col:
-        # Logout button aligned to the right, slightly lower to match the selectbox
+        # Logout button aligned to the right
         st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True)
         st.button("Logout", on_click=logout, use_container_width=True) 
     
+    st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
 
     # Load the selected page
     file = ADMIN_MENU[st.session_state.admin_menu_choice_key][1]
     load_page(file)
 
+def admin_sidebar_placeholder():
+    """Displays the dark sidebar with the header but no navigation elements."""
+    st.sidebar.markdown('<div class="sidebar-header">📦 OMS Admin</div>', unsafe_allow_html=True)
+    st.sidebar.markdown("<p style='padding: 0 15px; color: #aaa;'>Navigation is available on the main screen.</p>", unsafe_allow_html=True)
 
 # --- Departmental Routing ---
 
@@ -263,7 +298,6 @@ def department_router():
     
     role = st.session_state.get("role")
     
-    # Title and Logout button at the top
     st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
     
     col_btn, col_spacer = st.columns([0.2, 0.8])
@@ -292,8 +326,9 @@ def main_app():
 
     # Routing based on role
     if st.session_state["role"] == "admin":
-        # Admin gets the new dropdown navigation
-        admin_navigation_dropdown()
+        # Admin gets the on-screen dropdown
+        admin_sidebar_placeholder() # Show sidebar header but keep it empty
+        admin_navigation_dropdown_on_main()
     elif st.session_state["role"] in DEPARTMENT_PAGE_MAP:
         # Departmental users go directly to their page
         department_router()
