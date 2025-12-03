@@ -10,6 +10,9 @@ import base64
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
+    # CRITICAL: We explicitly collapse the sidebar to ensure it's removed from the layout 
+    # since we are no longer using it for navigation.
+    initial_sidebar_state="collapsed"
 )
 # --------------------------------------------------------
 # 🔔 ROUTE: Receive FCM token from frontend (admin only) 
@@ -45,7 +48,6 @@ DEPARTMENT_PAGE_MAP = {
 def get_user(username):
     """Retrieves user data from Firebase or returns the default admin."""
     try:
-        # NOTE: Assuming 'firebase.read' is a working function defined elsewhere
         fb_user = read(f"users/{username}") 
         if isinstance(fb_user, dict) and "password" in fb_user and "role" in fb_user:
             return fb_user
@@ -83,7 +85,7 @@ def logout():
 # --- Custom CSS Injection ---
 
 def inject_global_css():
-    """Injects all global and local styles, optimized for z-index, responsive design, and button clickability."""
+    """Injects styles for the login screen and hides the default Streamlit elements."""
     
     st.markdown("""
     <style>
@@ -106,8 +108,8 @@ def inject_global_css():
         
         .stApp:has(.login-container) [data-testid="stHeader"], 
         .stApp:has(.login-container) [data-testid="stToolbar"], 
-        .stApp:has(.login-container) [data-testid="stSidebar"],
-        .stApp:has(.login-container) .mobile-menu-btn {
+        /* Ensure sidebar is hidden on login page */
+        .stApp:has(.login-container) [data-testid="stSidebar"] {
             display: none !important;
         }
 
@@ -116,7 +118,7 @@ def inject_global_css():
             display: none !important;
         }
 
-        /* Login Card Styles (Kept as is) */
+        /* Login Card Styles */
         .login-container {
             backdrop-filter: blur(12px);
             background: rgba(255,255,255,0.18);
@@ -139,150 +141,16 @@ def inject_global_css():
         }
         
         /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING & Z-INDEX FIXES */
+        /* DROP DOWN MENU STYLING (Optional Aesthetic improvements) */
         /* ------------------------------------------------------------- */
         
-        /* Sidebar Container: Applies to both desktop and mobile */
-        .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
-            box-shadow: 4px 0 25px rgba(0,0,0,0.7);
-            width: 250px !important; 
-            min-width: 250px !important; 
-            transition: all 0.3s ease-in-out;
-            z-index: 15000; 
-            /* Start with absolute position for proper mobile interaction */
-            position: absolute; 
-            height: 100vh;
-        }
-        
-        /* ✅ FIX: Ensure sidebar content (buttons, radio) is clickable */
-        [data-testid="stSidebar"] > div {
-            z-index: 15001 !important; 
-        }
-
-        /* ------------------------------------------------------------- */
-        /* 🖥️ DESKTOP ONLY FIXES (min-width: 769px) */
-        /* ------------------------------------------------------------- */
-        @media (min-width: 769px) {
-             /* 1. Ensure the custom button is HIDDEN on desktop */
-             .mobile-menu-btn {
-                display: none !important; 
-             }
-             
-             /* 2. ✅ FIX: Ensure sidebar is VISIBLE and FIXED on desktop */
-             [data-testid="stSidebar"] {
-                transform: translateX(0) !important;
-                position: fixed !important; /* Fixed position for scrolling */
-             }
-             
-             /* 3. ✅ CRITICAL FIX: Ensure Main content is pushed right on desktop */
-             /* Target the wrapper that controls the main content's position */
-             [data-testid="stSidebar"] + div > div {
-                 margin-left: 250px !important; /* Sidebar width + 10px buffer if needed */
-             }
-        }
-        
-        /* ------------------------------------------------------------- */
-        /* 📱 MOBILE COLLAPSIBLE SIDEBAR (max-width: 768px) */
-        /* ------------------------------------------------------------- */
-
-        @media (max-width: 768px) {
-            
-            /* Hamburger button visible only on mobile (highest z-index) */
-            .mobile-menu-btn {
-                position: fixed;
-                top: 15px;
-                left: 15px;
-                font-size: 28px;
-                padding: 8px 14px;
-                background: #1f2833;
-                color: white;
-                border-radius: 6px;
-                z-index: 30000 !important; 
-                cursor: pointer;
-                display: block; 
-                box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-                line-height: 1;
-            }
-
-            /* 1. Initially HIDE sidebar on mobile */
-            [data-testid="stSidebar"] {
-                transform: translateX(-260px) !important;
-                position: absolute !important; 
-                top: 0;
-                left: 0;
-                height: 100vh;
-                z-index: 20000 !important; 
-            }
-
-            /* 2. When open, move sidebar into view */
-            body.sidebar-open [data-testid="stSidebar"] {
-                transform: translateX(0) !important;
-            }
-            
-            /* Mobile overlay: lower z-index than sidebar (20000) */
-            body.sidebar-open .block-container::before {
-                content: '';
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.5); 
-                z-index: 10000; 
-                pointer-events: auto; 
-            }
-
-            /* 3. Ensure main content has no left margin on mobile */
-            [data-testid="stSidebar"] + div > div {
-                 margin-left: 0px !important;
-            }
-            
-            /* Hide the default Streamlit hamburger on mobile */
-            [data-testid="stSidebarToggleButton"] {
-                display: none;
-            }
-        }
-        
-        /* --- General Sidebar Content Styling (Applies to all) --- */
-        .sidebar-header {
-            padding: 25px 15px 10px 15px; 
-            color: #f6f9fc;
-            font-size: 24px; 
-            font-weight: 800;
-            text-align: center;
-            border-bottom: 2px solid;
-            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
-            margin-bottom: 25px;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-        }
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } 
-        [data-testid="stSidebar"] .stRadio label * {
-            color: #f6f9fc !important;
-            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); 
-        }
-        [data-testid="stSidebar"] .stRadio label {
-            padding: 12px 15px; 
-            margin-bottom: 6px; 
-            border-radius: 8px; 
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: all 0.2s ease-in-out; 
-            font-weight: 500;
-            font-size: 15px; 
-        }
-        [data-testid="stSidebar"] .stButton button {
-            width: 90%;
-            margin: 30px 5% 20px 5%;
-            background-color: #1E90FF;
-            color: white;
-            border: none;
-            border-radius: 8px;
+        /* Ensure the selectbox label is prominent */
+        .stSelectbox label {
+            font-size: 18px;
             font-weight: 600;
-            padding: 12px;
-            transition: all 0.2s;
+            color: #1f2833; /* Dark text for contrast */
+            margin-bottom: 5px;
         }
-        
     </style>
     """, unsafe_allow_html=True)
 
@@ -326,13 +194,13 @@ def login_screen():
 
         st.markdown("</div>", unsafe_allow_html=True) 
 
-# --- Admin Sidebar & Routing ---
+# ------------------------------------------------------------
+# 🗑️ Removed admin_sidebar() function
+# ------------------------------------------------------------
 
-def admin_sidebar():
-    """Displays the navigation sidebar for 'admin' users."""
+def admin_navigation_dropdown():
+    """Displays the navigation dropdown and handles page routing for admin users."""
     
-    st.sidebar.markdown('<div class="sidebar-header">📦 OMS Admin</div>', unsafe_allow_html=True)
-
     ADMIN_MENU = {
         "Create Order": ("📦", "create_order.py"),
         "Design Dept": ("🎨", "design.py"),
@@ -344,35 +212,48 @@ def admin_sidebar():
         "All Orders": ("📋", "all_orders.py"),
         "User Management": ("🧑‍💼", "manage_users.py"),
     }
-
-    if "admin_menu_choice" not in st.session_state:
-        st.session_state.admin_menu_choice = "Create Order"
-
+    
+    # Format options for the Selectbox
     display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
     
-    current_key = st.session_state.admin_menu_choice
-    current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
+    if "admin_menu_choice_key" not in st.session_state:
+        # Default to the first option key
+        st.session_state.admin_menu_choice_key = "Create Order"
+
+    # Find the current selection based on the stored key
+    default_index = list(ADMIN_MENU.keys()).index(st.session_state.admin_menu_choice_key)
     
-    st.sidebar.markdown('<h3 style="color: #f6f9fc; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
+    # --- Navigation Bar Layout ---
+    nav_col, logout_col = st.columns([0.8, 0.2])
     
-    choice_with_icon = st.sidebar.radio(
-        "", 
-        display_options,
-        index=current_index,
-        key="admin_radio_menu" 
-    )
+    with nav_col:
+        # Create the dropdown menu
+        choice_with_icon = st.selectbox(
+            "Select Department/Page:", 
+            options=display_options,
+            index=default_index,
+            key="admin_select_menu",
+            label_visibility="visible"
+        )
+        
+        # Extract the original key (e.g., "Create Order") from the icon-prefixed string
+        choice = " ".join(choice_with_icon.split(" ")[1:])
+        
+        # If the selection changes, update the state and rerun
+        if choice != st.session_state.admin_menu_choice_key:
+              st.session_state.admin_menu_choice_key = choice
+              st.rerun() 
+              
+    with logout_col:
+        # Logout button aligned to the right, slightly lower to match the selectbox
+        st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True)
+        st.button("Logout", on_click=logout, use_container_width=True) 
+    
+    st.markdown("---")
 
-    choice = " ".join(choice_with_icon.split(" ")[1:])
-
-    if choice != st.session_state.admin_menu_choice:
-          st.session_state.admin_menu_choice = choice
-          st.rerun() 
-
-    _, file = ADMIN_MENU[st.session_state.admin_menu_choice]
+    # Load the selected page
+    file = ADMIN_MENU[st.session_state.admin_menu_choice_key][1]
     load_page(file)
-    
-    st.sidebar.markdown("---")
-    st.sidebar.button("Logout", on_click=logout) 
 
 
 # --- Departmental Routing ---
@@ -382,14 +263,16 @@ def department_router():
     
     role = st.session_state.get("role")
     
+    # Title and Logout button at the top
     st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
-    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
-    st.markdown("---")
-
+    
     col_btn, col_spacer = st.columns([0.2, 0.8])
     with col_btn:
-        st.button("Logout", on_click=logout) 
+        st.button("Logout", on_click=logout, use_container_width=True) 
 
+    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
+    st.markdown("---")
+    
     st.markdown("Please manage your assigned orders below.")
 
     file = DEPARTMENT_PAGE_MAP.get(role)
@@ -404,24 +287,24 @@ def department_router():
 def main_app():
     """Main function to handle post-login routing."""
     
+    st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
+    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
+
+    # Routing based on role
     if st.session_state["role"] == "admin":
-        
-        st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
-        st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
-        st.markdown("---")
-        
-        admin_sidebar()
-        
+        # Admin gets the new dropdown navigation
+        admin_navigation_dropdown()
     elif st.session_state["role"] in DEPARTMENT_PAGE_MAP:
+        # Departmental users go directly to their page
         department_router()
-        
     else:
+        # Fallback for unrecognized roles
         st.error(f"Your role **{st.session_state['role']}** is not authorized to view any page. Please contact administration.")
         st.button("Logout", on_click=logout) 
 
 # --- Main Execution Flow ---
 
-# 🔥 Inject CSS styles first
+# Inject CSS styles first
 inject_global_css()
 
 # ---------------------------------------------------------
@@ -431,24 +314,6 @@ inject_global_css()
 if "role" not in st.session_state:
     login_screen()
     st.stop()
-
-# ---------------------------------------------------------
-# ✅ Hamburger Button Injection (visible only on mobile)
-# ---------------------------------------------------------
-
-st.markdown("""
-    <div class="mobile-menu-btn" onclick="
-        document.body.classList.toggle('sidebar-open');
-        let btn = this;
-        // Optionally change icon from ☰ (&#9776;) to X (&times;)
-        if (document.body.classList.contains('sidebar-open')) {
-            btn.innerHTML = '&times;'; 
-        } else {
-            btn.innerHTML = '&#9776;';
-        }
-    ">
-        &#9776; </div>
-""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 🔥 Secure FCM token handling (after login)
