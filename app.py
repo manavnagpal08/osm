@@ -1,34 +1,26 @@
-import streamlit as st
+import streamlit as st 
 import os
-from firebase import read
-# --- FCM / Firebase Notification Imports ---
-from firebase import update, read
-import firebase_admin
-from firebase_admin import credentials, db
+from firebase import read, update
 import base64
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(
     page_title="OMS System", 
     layout="wide", 
-    # Removed initial_sidebar_state="collapsed" so the CSS can control the behavior
+    initial_sidebar_state="collapsed" 
 )
+
 # --------------------------------------------------------
-# 🔔 ROUTE: Receive FCM token from frontend (admin only) - Kept for compatibility
+# 🔔 ROUTE: Receive FCM token from frontend (admin only)
 # --------------------------------------------------------
 try:
     params = st.experimental_get_query_params()
-    # This route is now handled securely AFTER login check in the main flow
-    # but the initial quick exit is kept here in case of a direct unauthenticated POST
-    if "upload_admin_token" in params and st.request.method == 'POST':
-        # NOTE: This block is usually unreachable or will throw an error 
-        # because st.request.body is not reliably available outside a custom HTTP handler
-        # in standard Streamlit deployment. The secure handling is placed later.
+    if "upload_admin_token" in params:
         raw = st.request.body.decode()
         update("admin_tokens", {"token": raw})
         st.write("Token saved")
         st.stop()
-except Exception as e:
+except Exception:
     pass
 
 # --- Constants ---
@@ -38,12 +30,11 @@ DEFAULT_ADMIN = {
     "role": "admin"
 }
 
-# ⭐ FIX: Corrected the routing for the 'design' department 
-# 🚀 ADD: Added the 'lamination' department
+# All departments
 DEPARTMENT_PAGE_MAP = {
     "design": "design.py",
     "printing": "printing.py",
-    "lamination": "lamination.py", # NEW DEPARTMENT
+    "lamination": "lamination.py",
     "diecut": "diecut.py",
     "assembly": "assembly.py",
     "packaging": "packaging.py",
@@ -51,21 +42,24 @@ DEPARTMENT_PAGE_MAP = {
 
 # --- Utility Functions ---
 
+
 def get_user(username):
     """Retrieves user data from Firebase or returns the default admin."""
-    # NOTE: Assuming 'firebase.read' is a working function defined elsewhere
     try:
         fb_user = read(f"users/{username}") 
         if isinstance(fb_user, dict) and "password" in fb_user and "role" in fb_user:
             return fb_user
-    except Exception:
+    except:
         pass 
+
     if username == DEFAULT_ADMIN["username"]:
         return DEFAULT_ADMIN
+    
     return None
 
+
 def load_page(page_file):
-    """Dynamically loads and executes a page module from the 'modules' directory."""
+    """Loads and executes a module from /modules folder."""
     if ".." in page_file or not page_file.endswith(".py"):
         st.error("Invalid page file request.")
         return
@@ -78,446 +72,256 @@ def load_page(page_file):
                 code = compile(f.read(), full_path, "exec")
                 exec(code, globals())
         except Exception as e:
-            # Displaying the file path helps debugging
-            st.error(f"Error loading page **{page_path}** in modules folder: {e}")
+            st.error(f"Error loading page {page_file}: {e}")
     else:
-        st.error(f"Page module not found: **{page_file}** (Expected in the 'modules/' folder)")
+        st.error(f"Page not found: {page_file}")
+
 
 def logout():
-    """Clears session state and reruns to show the login screen."""
+    """Clear session and return to login."""
     for key in list(st.session_state.keys()):
-        if key not in ["theme"]: 
+        if key not in ["theme"]:
             del st.session_state[key]
     st.rerun()
 
-# --- Custom CSS Injection ---
+
+# --- GLOBAL CSS (Includes mobile collapsible sidebar) ---
 
 def inject_global_css():
-    """Injects all global and local styles, optimized for the standard size, ultimate beautiful sidebar, and mobile collapsibility."""
-    
     st.markdown("""
     <style>
-        /* Global App Styling */
-        .stApp {
-            /* Main content area is pure white */
-            background-color: #FFFFFF; 
-            font-family: 'Poppins', sans-serif;
-        }
 
-        /* ------------------------------------------------------------- */
-        /* LOGIN SCREEN STYLING (Hidden sidebar, custom background) */
-        /* ------------------------------------------------------------- */
-        .stApp:has(.login-container) {
-            background-image: url('https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEh9JgbXkHFD_68MIoMrl8sOeanj-iPFaeHPB8IaMYuwcAsNAstm3ZYY9i33sPe4BKe-iwexUYISoCen0ZBSO8VV_JZG1R9Wszjv3yEyAL1BBZBn4xTarqdVloKEq9BLR6PNaBp47ao4ZdopDD3oVN1A0GIkNL0ijwB7R1eLKAYGv8LKht52gryczc57bUtS/s320/greb.png');
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-            background-color: transparent;
-        }
-        
-        .stApp:has(.login-container) [data-testid="stHeader"], 
-        .stApp:has(.login-container) [data-testid="stToolbar"], 
-        .stApp:has(.login-container) [data-testid="stSidebar"],
-        /* Hide the hamburger button on the login screen */
-        .stApp:has(.login-container) .mobile-menu-btn {
-            display: none !important;
-        }
+    /* GLOBAL FONT */
+    .stApp {
+        font-family: 'Poppins', sans-serif;
+        background: white;
+    }
 
-        /* 🚀 FIX: Hide header for authenticated users in the main app */
-        .stApp:not(:has(.login-container)) [data-testid="stHeader"] {
-            display: none !important;
-        }
+    /* Hide Streamlit top header */
+    [data-testid="stHeader"] {
+        display: none !important;
+    }
 
-        /* Login Card Styles */
-        .login-container {
-            backdrop-filter: blur(12px);
-            background: rgba(255,255,255,0.18);
-            padding: 40px;
-            border-radius: 16px;
-            width: 380px;
-            margin: auto; 
-            margin-top: 140px; 
-            box-shadow: 0 4px 40px rgba(0,0,0,0.4);
-            border: 1px solid rgba(255,255,255,0.3);
-            text-align: left;
-        }
-        
-        .login-title {
-            color: #1f2833;
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        /* ------------------------------------------------------------- */
-        /* ADMIN SIDEBAR STYLING (Standard Size & Ultimate Aesthetics) */
-        /* ------------------------------------------------------------- */
-        
-        /* Sidebar Container: Proper size (250px) and dark gradient */
-        .stApp:not(:has(.login-container)) [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
-            box-shadow: 4px 0 25px rgba(0,0,0,0.7);
-            /* Standard Sidebar Size for Desktop */
-            width: 250px !important; 
-            min-width: 250px !important; 
-            transition: all 0.3s ease-in-out;
-        }
-        
-        /* Sidebar Header/Title Styling */
-        .sidebar-header {
-            padding: 25px 15px 10px 15px; 
-            color: #f6f9fc;
-            font-size: 24px; 
-            font-weight: 800;
-            text-align: center;
-            /* Gradient Underline */
-            border-bottom: 2px solid;
-            border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
-            margin-bottom: 25px;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-        }
+    /* --------------------------------------------- */
+    /* LOGIN SCREEN STYLING */
+    /* --------------------------------------------- */
+    .login-container {
+        backdrop-filter: blur(12px);
+        background: rgba(255,255,255,0.18);
+        padding: 40px;
+        border-radius: 16px;
+        width: 380px;
+        margin: auto;
+        margin-top: 140px;
+        box-shadow: 0 4px 40px rgba(0,0,0,0.4);
+        border: 1px solid rgba(255,255,255,0.3);
+        text-align: left;
+    }
 
-        /* Navigation Links Container */
-        [data-testid="stSidebar"] .stRadio > div { padding: 0 5px; } 
-        
-        /* FIX: Ensure all text elements are white/light for contrast, and add text shadow */
-        [data-testid="stSidebar"] .stRadio label * {
-            color: #f6f9fc !important;
-            text-shadow: 0 0 4px rgba(0, 0, 0, 0.4); 
-        }
+    .login-title {
+        color: #1f2833;
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 20px;
+        text-align: center;
+    }
 
-        /* Style the labels (the actual menu items) - Frosted Glass Look */
-        [data-testid="stSidebar"] .stRadio label {
-            padding: 12px 15px; 
-            margin-bottom: 6px; 
-            border-radius: 8px; 
-            
-            /* Frosted Look */
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            
-            transition: all 0.2s ease-in-out; 
-            font-weight: 500;
-            font-size: 15px; 
-        }
-        
-        /* Hover state: Stronger glow and color change */
-        [data-testid="stSidebar"] .stRadio label:hover {
-            background-color: rgba(0, 191, 255, 0.2);
-            color: #00BFFF !important;
-            transform: translateX(2px) scale(1.01); 
-            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.3);
-            cursor: pointer;
-        }
-        
-        /* FIX for hover text color (must target the inner span) */
-        [data-testid="stSidebar"] .stRadio label:hover * {
-            color: #00BFFF !important; 
-        }
+    /* --------------------------------------------- */
+    /* DESKTOP SIDEBAR STYLING */
+    /* --------------------------------------------- */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1f2833 0%, #12181d 100%);
+        box-shadow: 4px 0 25px rgba(0,0,0,0.6);
+        width: 250px !important;
+        min-width: 250px !important;
+    }
 
-        /* Selected/Checked state: Solid Electric Blue Highlight */
-        [data-testid="stSidebar"] .stRadio input:checked + div > span {
-            background-color: #00BFFF !important; /* Electric Blue */
-            color: white !important; 
-            border-radius: 8px;
-            font-weight: 700;
-            padding: 12px 15px;
-            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.5);
-        }
+    .sidebar-header {
+        padding: 25px 15px 10px 15px;
+        color: white;
+        font-size: 24px;
+        font-weight: 800;
+        text-align: center;
+        border-bottom: 2px solid;
+        border-image: linear-gradient(to right, #00BFFF, #1E90FF) 1;
+        margin-bottom: 25px;
+    }
 
-        /* Logout Button Styling: Prominent and separated */
-        [data-testid="stSidebar"] .stButton button {
-            width: 90%;
-            margin: 30px 5% 20px 5%;
-            background-color: #1E90FF;
+    /* --------------------------------------------- */
+    /* 📱 MOBILE COLLAPSIBLE SIDEBAR SYSTEM */
+    /* --------------------------------------------- */
+
+    @media (max-width: 768px) {
+
+        /* Hamburger Button */
+        .mobile-menu-btn {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            font-size: 30px;
+            padding: 8px 14px;
+            background: #1f2833;
             color: white;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            padding: 12px;
-            transition: all 0.2s;
-        }
-        [data-testid="stSidebar"] .stButton button:hover {
-            background-color: #00BFFF;
-            transform: scale(1.02);
+            border-radius: 6px;
+            z-index: 20000 !important;
+            cursor: pointer;
+            display: block;
         }
 
-        /* ------------------------------------------------------------- */
-        /* 📱 MOBILE COLLAPSIBLE SIDEBAR (Hamburger Menu) - NEW */
-        /* ------------------------------------------------------------- */
-
-        @media (max-width: 768px) {
-            
-            /* Hamburger button visible only on mobile */
-            .mobile-menu-btn {
-                position: fixed;
-                top: 15px;
-                left: 15px;
-                font-size: 28px;
-                padding: 8px 14px;
-                background: #1f2833;
-                color: white;
-                border-radius: 6px;
-                z-index: 20000 !important;
-                cursor: pointer;
-                display: block; /* Show on mobile */
-                box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-                transition: transform 0.3s;
-                line-height: 1; /* Fix vertical alignment of ☰ */
-            }
-
-            /* Initially hide sidebar (collapsed) */
-            [data-testid="stSidebar"] {
-                transform: translateX(-260px) !important;
-                transition: all 0.35s ease-in-out;
-                position: fixed !important;
-                top: 0;
-                left: 0;
-                height: 100vh;
-                z-index: 15000 !important;
-            }
-
-            /* When body has 'sidebar-open' class, move sidebar into view */
-            body.sidebar-open [data-testid="stSidebar"] {
-                transform: translateX(0) !important;
-            }
-            
-            /* Add an overlay to the main content when sidebar is open to block clicks */
-            body.sidebar-open .block-container::before {
-                content: '';
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.5); /* Semi-transparent black */
-                z-index: 10000; 
-                pointer-events: auto; /* Allow clicks on overlay to close */
-            }
-
-            /* Ensure main content full width when closed on mobile */
-            .stMainBlockContainer {
-                margin-left: 0 !important;
-            }
-            
-            /* Hide the default Streamlit hamburger on mobile */
-            [data-testid="stSidebarToggleButton"] {
-                display: none;
-            }
+        /* Hide sidebar initially */
+        [data-testid="stSidebar"] {
+            transform: translateX(-260px);
+            transition: all 0.35s ease-in-out;
+            position: fixed !important;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 240px !important;
+            z-index: 15000 !important;
         }
-        
-        /* Ensure the custom button is hidden on desktop */
-        @media (min-width: 769px) {
-             .mobile-menu-btn {
-                display: none; 
-            }
+
+        /* Sidebar open state */
+        body.sidebar-open [data-testid="stSidebar"] {
+            transform: translateX(0);
         }
+
+        /* Push main content */
+        body.sidebar-open .stMain {
+            margin-left: 240px !important;
+            transition: margin-left 0.35s ease-in-out;
+        }
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
-# --- Login Screen ---
+
+
+
+# --- LOGIN SCREEN ---
 
 def login_screen():
-    """Displays the login interface."""
-    
-    # ⭐ FIX: Center columns FIRST
-    col1, col2, col3 = st.columns([1, 2, 1])
-
+    col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        # START container INSIDE col2 (important!)
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
         st.markdown('<div class="login-title">🔐 OMS Login</div>', unsafe_allow_html=True)
 
-        # Form prevents rerun glitches, clear_on_submit=False is the default but added for clarity
-        with st.form("login_form", clear_on_submit=False):
-
-            username = st.text_input("Username", key="login_username_input", autocomplete="username")
-            password = st.text_input("Password", type="password", key="login_password_input", autocomplete="current-password")
-
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Login")
 
             if submitted:
-                username_clean = username.strip()
-                password_clean = password.strip()
-
-                if not username_clean or not password_clean:
+                if not username or not password:
                     st.error("Please enter both username and password.")
-                    return # Exit the submitted block
+                    return
 
-                user = get_user(username_clean)
+                user = get_user(username)
 
                 if not user:
                     st.error("User not found.")
                     return
 
-                if user.get("password") != password_clean:
+                if user.get("password") != password:
                     st.error("Incorrect password.")
                     return
 
-                st.session_state.username = username_clean
+                st.session_state.username = username
                 st.session_state.role = user["role"]
+                st.rerun()
 
-                st.success("Login successful! Redirecting...")
-                st.rerun() # Trigger the main_app() function
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        # END container
-        st.markdown("</div>", unsafe_allow_html=True) 
 
-# --- Admin Sidebar & Routing ---
+
+# --- ADMIN SIDEBAR NAVIGATION ---
 
 def admin_sidebar():
-    """Displays the ultimate beautifully styled navigation sidebar for 'admin' users."""
-    
     st.sidebar.markdown('<div class="sidebar-header">📦 OMS Admin</div>', unsafe_allow_html=True)
 
     ADMIN_MENU = {
-        "Create Order": ("📦", "create_order.py"),
-        "Design Dept": ("🎨", "design.py"),
-        "Printing Dept": ("🖨️", "printing.py"),
-        "Lamination Dept": ("🛡️", "lamination.py"), # NEW ENTRY
-        "Die-Cut Dept": ("✂️", "diecut.py"),
-        "Assembly Dept": ("🔧", "assembly.py"),
-        "Packaging Dept": ("📦✨", "packaging.py"),
-        "All Orders": ("📋", "all_orders.py"),
-        "User Management": ("🧑‍💼", "manage_users.py"),
+        "Create Order": "create_order.py",
+        "Design Dept": "design.py",
+        "Printing Dept": "printing.py",
+        "Lamination Dept": "lamination.py",
+        "Die-Cut Dept": "diecut.py",
+        "Assembly Dept": "assembly.py",
+        "Packaging Dept": "packaging.py",
+        "All Orders": "all_orders.py",
+        "User Management": "manage_users.py",
     }
 
     if "admin_menu_choice" not in st.session_state:
         st.session_state.admin_menu_choice = "Create Order"
 
-    display_options = [f"{icon} {key}" for key, (icon, file) in ADMIN_MENU.items()]
-    
-    current_key = st.session_state.admin_menu_choice
-    current_index = list(ADMIN_MENU.keys()).index(current_key) if current_key in ADMIN_MENU else 0
-    
-    st.sidebar.markdown('<h3 style="color: #f6f9fc; padding: 0 15px;">🧭 Navigation</h3>', unsafe_allow_html=True)
-    
-    # Use st.radio for the navigation menu
-    choice_with_icon = st.sidebar.radio(
-        "", 
-        display_options,
-        index=current_index,
-        key="admin_radio_menu" 
-    )
+    choice = st.sidebar.radio("Navigation", list(ADMIN_MENU.keys()))
 
-    # Extract the original key (e.g., "Create Order") from the icon-prefixed string
-    choice = " ".join(choice_with_icon.split(" ")[1:])
-
-    # Check if the selection has changed to load the new page and rerun
     if choice != st.session_state.admin_menu_choice:
-          st.session_state.admin_menu_choice = choice
-          st.rerun() 
+        st.session_state.admin_menu_choice = choice
+        st.rerun()
 
-    # Load the selected page
-    _, file = ADMIN_MENU[st.session_state.admin_menu_choice]
-    load_page(file)
-    
-    st.sidebar.markdown("---")
-    st.sidebar.button("Logout", on_click=logout) 
+    load_page(ADMIN_MENU[choice])
+
+    st.sidebar.button("Logout", on_click=logout)
 
 
-# --- Departmental Routing ---
+
+# --- DEPARTMENT ROUTING ---
 
 def department_router():
-    """Routes a non-admin user directly to their assigned department page."""
-    
     role = st.session_state.get("role")
     
-    # The header is now the main content
-    st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department Portal")
-    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
-    st.markdown("---")
-
-    col_btn, col_spacer = st.columns([0.2, 0.8])
-    with col_btn:
-        st.button("Logout", on_click=logout) 
-
-    st.markdown("Please manage your assigned orders below.")
+    st.markdown(f"## ⚙️ Welcome to the **{role.title()}** Department")
+    st.button("Logout", on_click=logout)
 
     file = DEPARTMENT_PAGE_MAP.get(role)
 
     if file:
         load_page(file)
     else:
-        st.error(f"Your role **{role}** is not assigned to a department page.")
+        st.error("Role not assigned.")
 
-# --- Application Entry Point ---
+
+
+# --- MAIN APP ---
 
 def main_app():
-    """Main function to handle post-login routing."""
-    
-    # Routing based on role
+    st.markdown('<h1 style="color:#3498db;">📦 OMS Management System</h1>', unsafe_allow_html=True)
+    st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
+    st.markdown("---")
+
     if st.session_state["role"] == "admin":
-        
-        # Title is now visible in the main content area for ADMIN
-        st.markdown('<h1 style="color:#3498db;"><span>📦</span> OMS Management System</h1>', unsafe_allow_html=True)
-        st.caption(f"Logged in as **{st.session_state['username']}** | Role: **{st.session_state['role']}**")
-        st.markdown("---")
-        
         admin_sidebar()
-        
-    elif st.session_state["role"] in DEPARTMENT_PAGE_MAP:
-        # Departmental users get their specialized router/page
-        department_router()
-        
     else:
-        # Fallback for unrecognized roles
-        st.error(f"Your role **{st.session_state['role']}** is not authorized to view any page. Please contact administration.")
-        st.button("Logout", on_click=logout) 
+        department_router()
 
-# --- Main Execution Flow ---
 
-# 🔥 Inject CSS styles first
+
+# --- EXECUTION FLOW ---
+
 inject_global_css()
 
-# ---------------------------------------------------------
-# 🚨 FIXED LOGIN ROUTING (Stops infinite redirect loop)
-# ---------------------------------------------------------
+# Add Mobile Hamburger Button
+st.markdown("""
+    <div class="mobile-menu-btn" onclick="document.body.classList.toggle('sidebar-open');">
+        ☰
+    </div>
+""", unsafe_allow_html=True)
 
-# If user is not logged in → show login screen ONLY
+# Login check
 if "role" not in st.session_state:
     login_screen()
     st.stop()
 
-# ---------------------------------------------------------
-# 🚀 If logged in → Add Hamburger Button + handle main application
-# ---------------------------------------------------------
-
-# ✅ STEP 1: Add Hamburger Button for Mobile UX
-# This HTML/JS trick toggles the 'sidebar-open' class on the body
-st.markdown("""
-    <div class="mobile-menu-btn" onclick="
-        document.body.classList.toggle('sidebar-open');
-        let btn = this;
-        // Optionally change icon from ☰ (Unicode: &#9776;) to X (Unicode: &times;)
-        if (document.body.classList.contains('sidebar-open')) {
-            btn.innerHTML = '&times;'; 
-        } else {
-            btn.innerHTML = '&#9776;';
-        }
-    ">
-        &#9776; </div>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# 🔥 PART 2 — Securely handle FCM token route (after login)
-# ---------------------------------------------------------
+# After login, check FCM secure route
 params = st.experimental_get_query_params()
 if "upload_admin_token" in params and st.session_state.get("role") == "admin":
     try:
-        # NOTE: This only works with a custom Streamlit frontend component 
-        # or if deployed in a specific environment that supports request body.
         raw = st.request.body.decode()
-        # Assuming 'update' is a working Firebase function
         update("admin_tokens", {"token": raw})
         st.success("Admin device token saved!")
     except Exception as e:
-        # Catch error if request body is not available/decode fails
-        st.error(f"Error saving token or request body not found: {e}")
+        st.error(f"Error saving token: {e}")
     st.stop()
 
-# ---------------------------------------------------------
-# 🚀 If logged in → go to main application
-# ---------------------------------------------------------
 main_app()
