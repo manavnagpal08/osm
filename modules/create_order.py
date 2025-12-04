@@ -1,5 +1,5 @@
 import streamlit as st
-# 👇 PRODUCTION IMPORTS: NOW UNCOMMENTED AND ACTIVE
+# 👇 PRODUCTION IMPORTS: Using the provided firebase.py
 from firebase import read, push, update 
 from datetime import date, datetime 
 import qrcode
@@ -16,47 +16,44 @@ import os
 import time 
 
 # ===================================================
-# UTILITY FUNCTIONS (Non-Firebase)
-# ===================================================
-# NOTE: The read/push/update functions are now imported from firebase.py
-
-def generate_order_id():
-    """Generates a unique order ID based on the current timestamp."""
-    return f"ORD{int(time.time())}"
+# UTILITY FUNCTIONS
 # ===================================================
 
+def generate_order_id(all_orders: dict):
+    """
+    Generates the next sequential order ID in SRPXXX format by reading 
+    the largest existing ID from the 'orders' data.
+    """
+    # Extract existing numeric IDs (only those starting with 'SRP')
+    current_numbers = []
+    
+    # Use .values() to iterate over the actual order data
+    for order_data in all_orders.values():
+        if isinstance(order_data, dict):
+            order_id = order_data.get("order_id", "")
+            
+            # Check for SRP prefix and ensure the remainder is numeric
+            if order_id.startswith("SRP") and len(order_id) > 3 and order_id[3:].isdigit():
+                try:
+                    current_numbers.append(int(order_id[3:]))
+                except ValueError:
+                    continue # Should not happen if isdigit() is true, but safe programming
+    
+    # Determine the next number
+    if not current_numbers:
+        next_number = 1
+    else:
+        next_number = max(current_numbers) + 1
+        
+    # Format to SRP followed by minimum 3 digits (SRP001, SRP010, SRP100, SRP1000)
+    return f"SRP{next_number:03d}"
 
 # ---------------------------------------------------
-# CONFIG & INITIALIZATION
+# General Helper Functions (No changes needed)
 # ---------------------------------------------------
-st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_icon="📦")
 
-# 🚨 Update these with your actual credentials if you implement email sending
-GMAIL_USER = "yourgmail@gmail.com" 
-GMAIL_PASS = "your_app_password" 
-
-# Session State Initialization for flow control
-if "order_created_flag" not in st.session_state:
-    st.session_state["order_created_flag"] = False
-if "last_order_pdf" not in st.session_state:
-    st.session_state["last_order_pdf"] = None
-if "current_product_type" not in st.session_state:
-    st.session_state["current_product_type"] = None
-if "order_type" not in st.session_state:
-    st.session_state["order_type"] = "New Order 🆕"
-
-# Session State Initialization for customer input values (used across New/Repeat)
-for key in ["customer_name_final", "customer_phone_final", "customer_email_final"]:
-    if key not in st.session_state:
-        st.session_state[key] = ""
-
-PLACEHOLDER = "--- Select Type ---" 
-
-
-# ---------------------------------------------------
-# HELPER FUNCTIONS 
-# ---------------------------------------------------
 def generate_qr_base64(order_id: str):
+    # NOTE: The URL in the QR code now points to the Firebase DB structure for tracking
     tracking_url = f"https://omss-2ccc6-default-rtdb.firebaseio.com/orders/{order_id}"
     qr = qrcode.QRCode(box_size=10, border=3)
     qr.add_data(tracking_url)
@@ -68,12 +65,10 @@ def generate_qr_base64(order_id: str):
 
 def get_whatsapp_link(phone, order_id, customer):
     clean_phone = "".join(filter(str.isdigit, phone))
-    # Assuming phone numbers stored in Firebase are local or international without leading +
-    # Adding 91 if it's missing (common for Indian numbers in this context)
+    # Ensure standard Indian format for WhatsApp linking
     if not clean_phone.startswith("91"):
         clean_phone = "91" + clean_phone 
         
-    # NOTE: Update the tracking link below to your customer-facing tracking page URL
     tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}" 
     message = (
         f"Hello {customer}, your order {order_id} has been created successfully!\n"
@@ -155,27 +150,37 @@ def generate_order_pdf(data, qr_b64):
 
 
 # ---------------------------------------------------
-# LOAD DATA & HELPER FUNCTIONS
+# CONFIG & INITIALIZATION
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
 
-# 🚨 This now attempts to read live data from your Firebase path 'orders'
+# 🚨 Data is now read live from Firebase
 all_orders = read("orders") or {} 
 customer_list = sorted(list(set(
     o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
 )))
 
-# 🚨 This now attempts to read live data from your Firebase path 'product_categories'
 categories = read("product_categories") or {} 
 # Fallback structure for categories if database returns None or empty
 default_categories = {
     "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
     "Bag": ["Paper Bags", "SOS Envelopes"]
 }
-# Only populate categories from default if the database returned nothing
 if not categories:
     categories = default_categories
 
+
+# Session State Initialization and Reset
+if "order_created_flag" not in st.session_state:
+    st.session_state["order_created_flag"] = False
+# ... (rest of session state initialization as before) ...
+if "last_order_pdf" not in st.session_state: st.session_state["last_order_pdf"] = None
+if "current_product_type" not in st.session_state: st.session_state["current_product_type"] = None
+if "order_type" not in st.session_state: st.session_state["order_type"] = "New Order 🆕"
+for key in ["customer_name_final", "customer_phone_final", "customer_email_final"]:
+    if key not in st.session_state: st.session_state[key] = ""
+
+PLACEHOLDER = "--- Select Type ---" 
 
 def update_product_type():
     st.session_state.current_product_type = st.session_state.product_type_select
@@ -234,7 +239,6 @@ with box:
     # REPEAT ORDER
     # ---------------------------
     else:
-        # Reset customer details when switching from New to Repeat
         if st.session_state.order_type == "New Order 🆕":
             st.session_state.customer_name_final = ""
             st.session_state.customer_phone_final = ""
@@ -258,7 +262,6 @@ with box:
             email_val = ""
 
             if cust_orders:
-                # Find latest order for phone/email (sorted by date)
                 latest = sorted(
                     cust_orders,
                     key=lambda x: x.get("received", "0000"),
@@ -268,11 +271,9 @@ with box:
                 phone_val = latest.get("customer_phone", "")
                 email_val = latest.get("customer_email", "")
 
-            # Set the final values in session_state, used for submission
             st.session_state.customer_phone_final = phone_val
             st.session_state.customer_email_final = email_val
 
-            # Display the fetched data in disabled fields
             st.text_input("Phone", value=phone_val, disabled=True)
             st.text_input("Email", value=email_val, disabled=True)
 
@@ -284,9 +285,6 @@ with box:
             st.text_input("Phone", value="", disabled=True)
             st.text_input("Email", value="", disabled=True)
 
-# ---------------------------
-# FINAL CUSTOMER VARIABLES
-# ---------------------------
 final_customer_input = st.session_state.get("customer_name_final", "")
 final_phone_input = st.session_state.get("customer_phone_final", "")
 final_email_input = st.session_state.get("customer_email_final", "")
@@ -308,23 +306,20 @@ if order_type_simple == "Repeat" and final_customer_input:
         cust_orders.sort(key=lambda x: x.get("received", "0000"), reverse=True)
         
         options = ["--- Select for Auto-fill ---"] + [
-            f"{o['order_id']} — {o.get('item', '[No Description]')}" 
-            for o in cust_orders
+            f"{o.get('order_id', 'N/A')} — {o.get('item', '[No Description]')}" 
+            for o in cust_orders if o.get('order_id') # Filter out orders without an ID
         ]
         
         sel = st.selectbox("Choose Previous Order", options, key="autofill_order_select")
 
         if sel != "--- Select for Auto-fill ---":
             sel_id = sel.split("—")[0].strip()
-            # The structure of all_orders is {unique_firebase_key: {order_data}}
-            # We need to find the specific order data corresponding to the selected order_id
-            previous_order_entry = next((
-                o for o in all_orders.values() 
+            previous_order = next((
+                o for o in cust_orders 
                 if isinstance(o, dict) and o.get("order_id") == sel_id
             ), None)
             
-            if previous_order_entry:
-                previous_order = previous_order_entry
+            if previous_order:
                 st.info(f"Loaded details from order **{sel_id}** for auto-filling Step 3.")
             
 st.markdown("---")
@@ -335,25 +330,26 @@ st.markdown("---")
 st.header("3️⃣ Order Specification")
 
 prev = previous_order or {}
-order_id = generate_order_id()
-st.info(f"**New Order ID:** `{order_id}`")
+# 🚨 Use the new sequential ID generation logic
+order_id = generate_order_id(all_orders) 
+st.info(f"**New Order ID:** `{order_id}` (Generated sequentially in SRPXXX format)")
 
 ## Core Details
 st.subheader("Core Details")
 colA, colB, colC, colD = st.columns(4)
 
+# 🚨 Use date.today(), which reflects the local IST date if the server is configured correctly.
 with colA:
-    receive_date = st.date_input("📥 Received Date", value=date.today(), key="receive_date")
+    receive_date = st.date_input("📥 Received Date (IST)", value=date.today(), key="receive_date")
 with colB:
     default_due_date = date.today()
     if 'due' in prev and prev['due']:
         try:
-            # Safely attempt to parse date from string
             default_due_date = datetime.strptime(prev['due'], '%Y-%m-%d').date()
         except Exception:
             pass 
 
-    due_date = st.date_input("📤 Due Date", value=default_due_date, key="due_date")
+    due_date = st.date_input("📤 Due Date (IST)", value=default_due_date, key="due_date")
     
 receive_dt = receive_date.strftime("%Y-%m-%d")
 due_dt = due_date.strftime("%Y-%m-%d")
@@ -508,7 +504,6 @@ if submitted:
         "rate": rate,
         "stage": "Design", 
         "order_qr": qr_b64,
-        # Firebase push will automatically add a unique key for the new order
     }
 
     # 🚨 PUSH DATA TO FIREBASE
