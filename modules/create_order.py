@@ -332,7 +332,7 @@ st.header("3️⃣ Order Specification")
 prev = previous_order or {}
 # 🚨 Use the new sequential ID generation logic
 order_id = generate_order_id(all_orders) 
-st.info(f"**New Order ID:** `{order_id}` (Generated sequentially in SRPXXX format)")
+
 
 ## Core Details
 st.subheader("Core Details")
