@@ -1,283 +1,609 @@
 import streamlit as st
-from firebase import read, push, update
+# 👇 USING REAL IMPORTS
+from firebase import read, push, update 
 from utils import generate_order_id
 from datetime import date, datetime, timezone, timedelta
-import qrcode, base64, io, tempfile, urllib.parse, smtplib
+import qrcode
+import base64
+import io
+import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import urllib.parse
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+import tempfile
+import os 
+import time 
 
 
+# ---------------------------------------------------
+# CONFIG
+# ---------------------------------------------------
 st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_icon="📦")
 
+GMAIL_USER = "yourgmail@gmail.com" 
+GMAIL_PASS = "your_app_password" 
 
-# ----------------------------------------------------------------
+if "order_created_flag" not in st.session_state:
+    st.session_state["order_created_flag"] = False
+
+if "last_order_pdf" not in st.session_state:
+    st.session_state["last_order_pdf"] = None
+
+# Set IST timezone once
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+# ---------------------------------------------------
 # QR GENERATOR
-# ----------------------------------------------------------------
-def generate_qr_base64(order_id):
-    url = f"https://srppackaging.com/tracking.html?id={order_id}"
+# ---------------------------------------------------
+def generate_qr_base64(order_id: str):
+    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
     qr = qrcode.QRCode(box_size=10, border=3)
-    qr.add_data(url)
+    qr.add_data(tracking_url)
     qr.make(fit=True)
-    img = qr.make_image()
+    img = qr.make_image(fill_color="black", back_color="white")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 
-# ----------------------------------------------------------------
+# ---------------------------------------------------
 # WHATSAPP LINK
-# ----------------------------------------------------------------
-def get_whatsapp(phone, order_id, customer):
-    phone = "".join(filter(str.isdigit, phone))
-    if not phone.startswith("91"):
-        phone = "91" + phone
+# ---------------------------------------------------
+def get_whatsapp_link(phone, order_id, customer):
+    clean_phone = "".join(filter(str.isdigit, phone))
+    if not clean_phone.startswith("91"):
+        clean_phone = "91" + clean_phone
 
-    url = f"https://srppackaging.com/tracking.html?id={order_id}"
-
-    msg = urllib.parse.quote(
-        f"Hello {customer}, your order {order_id} has been created.\nTrack here:\n{url}\n\nShree Ram Packers"
+    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
+    message = (
+        f"Hello {customer}, your order {order_id} has been created successfully!\n"
+        f"Track your order:\n{tracking_url}\n\n"
+        f"Thank you – Shree Ram Packers"
     )
+    encoded = urllib.parse.quote(message)
+    return f"https://wa.me/{clean_phone}?text={encoded}"
 
-    return f"https://wa.me/{phone}?text={msg}"
+
+# ---------------------------------------------------
+# EMAIL
+# ---------------------------------------------------
+def send_gmail(to, subject, html):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_USER
+    msg["To"] = to
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server.login(GMAIL_USER, GMAIL_PASS)
+        server.sendmail(GMAIL_USER, to, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"Email Error: {e}")
+        return False
 
 
-# ----------------------------------------------------------------
+# ---------------------------------------------------
 # PDF GENERATOR
-# ----------------------------------------------------------------
+# ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    c = canvas.Canvas(temp.name, pagesize=A4)
+    logo_path = "srplogo.png" 
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    qr_temp = None
 
-    y = 800
-    c.setFont("Helvetica-Bold", 20)
-    c.drawString(40, y, "Shree Ram Packers")
-    y -= 50
+    try:
+        c = canvas.Canvas(temp_file.name, pagesize=A4)
+        width, height = A4
+        x_margin = 40
+        HEADER_HEIGHT = 160
 
-    c.setFont("Helvetica", 12)
-    for k, v in data.items():
-        if k == "order_qr": continue
-        c.drawString(40, y, f"{k}: {v}")
-        y -= 18
+        # Header BG
+        c.setFillColorRGB(0.05, 0.48, 0.22)
+        c.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, stroke=0, fill=1)
 
-    qr_bytes = base64.b64decode(qr_b64)
-    qr_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    qr_img.write(qr_bytes)
-    qr_img.close()
+        # Logo
+        try:
+            c.drawImage(logo_path, x_margin, height - HEADER_HEIGHT + 30, width=130,
+                        preserveAspectRatio=True, mask="auto")
+        except:
+            pass 
 
-    c.drawImage(qr_img.name, 400, 100, width=140, height=140)
-    c.save()
-    return temp.name
+        separator_x = x_margin + 160
+        c.setStrokeColorRGB(1, 1, 1)
+        c.setLineWidth(1.4)
+        c.line(separator_x, height - HEADER_HEIGHT + 20, separator_x, height - 20)
+
+        left_block_x = separator_x + 20
+        top_y = height - 60
+
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("Helvetica-Bold", 30)
+        c.drawString(left_block_x, top_y, "Shree Ram Packers")
+
+        c.setFont("Helvetica", 14)
+        c.drawString(left_block_x, top_y - 25, "Premium Packaging & Printing Solutions")
+
+        info_y = top_y - 55
+        c.setFont("Helvetica", 12)
+        for line in ["Mobile: 9312215239", "GSTIN: 29BCIPK6225L1Z6", "Website: https://srppackaging.com/"]:
+            c.drawString(left_block_x, info_y, line)
+            info_y -= 18
+
+        c.setStrokeColorRGB(0.07, 0.56, 0.27)
+        c.setLineWidth(3)
+        c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin,
+            height - HEADER_HEIGHT - 10)
+
+        c.setFillColorRGB(0, 0, 0)
+        y = height - HEADER_HEIGHT - 40
+
+        # Customer Info
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(x_margin, y, "Customer Details")
+        y -= 35
+
+        total_value = data["qty"] * data["rate"]
+
+        customer_details = [
+            ("Customer Name", data["customer"]),
+            ("Phone", data["customer_phone"]),
+            ("Email", data["customer_email"]),
+            ("Received Date", data["received"]),
+            ("Due Date", data["due"]),
+        ]
+        
+        for label, value in customer_details:
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(x_margin, y, f"{label}:")
+            c.setFont("Helvetica", 11)
+            c.drawString(x_margin + 150, y, str(value))
+            y -= 18
+
+        y -= 20
+
+        # Order Info
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(x_margin, y, "Order Details")
+        y -= 35
+
+        order_details = [
+            ("Order ID", data["order_id"]),
+            ("Product Type", data["product_type"]),
+            ("Category", data["category"]),
+            ("Priority", data["priority"]),
+            ("Quantity", data["qty"]),
+            ("Rate (₹)", f"₹{data['rate']:,.2f}"),
+            ("Total Value (₹)", f"₹{total_value:,.2f}"),
+            ("Advance Received", data["advance"]),
+            ("Board Thickness", data["board_thickness_id"]),
+            ("Paper Thickness", data["paper_thickness_id"]),
+            ("Size ID", data["size_id"]),
+            ("Foil", data["foil_id"]),
+            ("Spot UV", data["spotuv_id"]),
+            ("Description", data["item"]),
+        ]
+
+        for label, value in order_details:
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(x_margin, y, f"{label}:")
+            c.setFont("Helvetica", 11)
+            
+            # Handle long description wrapping (simple)
+            if label == "Description":
+                desc_lines = str(value).split('\n')
+                current_y = y
+                for line in desc_lines:
+                    c.drawString(x_margin + 180, current_y, line)
+                    current_y -= 12
+                y = current_y + 12
+            else:
+                c.drawString(x_margin + 180, y, str(value))
+            
+            y -= 18
+
+        # QR
+        y_qr = height - HEADER_HEIGHT - 40
+        qr_img = base64.b64decode(qr_b64)
+        qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        qr_temp.write(qr_img)
+        qr_temp.close()
+        c.drawImage(qr_temp.name, width - 180, y_qr, width=130, height=130)
+
+        c.save()
+        return temp_file.name
+    
+    finally:
+        # Clean up temporary QR file
+        if qr_temp and os.path.exists(qr_temp.name):
+            os.unlink(qr_temp.name)
 
 
-# -------------------------------------------------
-# LOAD ORDERS
-# -------------------------------------------------
-orders = read("orders") or {}
-customer_list = sorted({o.get("customer", "") for o in orders.values() if isinstance(o, dict)})
+# ---------------------------------------------------
+# LOAD DATA & INITIAL SETUP
+# ---------------------------------------------------
+st.title("📦 Manufacturing Order Management")
+st.caption("Create and track new production orders for Shree Ram Packers.")
 
-# -------------------------------------------------
-# LOAD PRODUCT CATEGORIES
-# -------------------------------------------------
-categories = read("product_categories") or {
+all_orders = read("orders") or {}
+customer_list = sorted({
+    o.get("customer", "").strip()
+    for o in all_orders.values()
+    if isinstance(o, dict)
+})
+
+# Load Product Categories
+categories = read("product_categories") or {}
+default_categories = {
     "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
     "Bag": ["Paper Bags", "SOS Envelopes"]
 }
+# Fallback to defaults if DB is empty
+for t in default_categories:
+    if t not in categories:
+        categories[t] = default_categories[t]
 
 
-# -------------------------------------------------
-# CATEGORY ADMIN
-# -------------------------------------------------
-st.subheader("⚙️ Manage Product Categories")
-with st.expander("Add Category"):
-    type_choice = st.selectbox("Product Type", ["Box", "Bag"])
-    new_cat = st.text_input("New Category Name")
+# ---------------------------------------------------
+# DEBUGGING STATEMENT 🛠️
+# ---------------------------------------------------
+st.sidebar.subheader("🐞 Debug Variables")
+# ---------------------------------------------------
 
-    if st.button("Add Category"):
+
+# ---------------------------------------------------
+# CATEGORY ADMIN PANEL (MOVED TO SIDEBAR)
+# ---------------------------------------------------
+st.sidebar.subheader("⚙️ Manage Product Categories")
+
+with st.sidebar.expander("Add/View Categories"):
+    type_choice_admin = st.selectbox("Select Product Type", ["Box", "Bag"], key="admin_type")
+    new_cat = st.text_input("New Category Name", key="admin_cat_name")
+
+    if st.button("Add Category", key="admin_add_btn"):
         if new_cat.strip():
-            if new_cat not in categories[type_choice]:
-                categories[type_choice].append(new_cat)
+            new_cat_clean = new_cat.strip()
+            if new_cat_clean not in categories.get(type_choice_admin, []):
+                if type_choice_admin not in categories:
+                    categories[type_choice_admin] = []
+                categories[type_choice_admin].append(new_cat_clean)
                 update("product_categories", categories)
-                st.success("Category added!")
+                st.success(f"Category '{new_cat_clean}' added to {type_choice_admin}!")
                 st.rerun()
             else:
                 st.warning("Category already exists.")
 
-
-# -------------------------------------------------
-# CUSTOMER DETAILS
-# -------------------------------------------------
-st.subheader("1️⃣ Customer Information")
-
-customer = st.text_input("Customer Name (Required)")
-phone = st.text_input("Customer Phone (Required)")
-email = st.text_input("Customer Email")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Current Categories:**")
+    for t, cats in categories.items():
+        st.sidebar.markdown(f"**{t}**:")
+        st.sidebar.write(", ".join(cats))
 
 
-# -------------------------------------------------
-# PREVIOUS ORDER AUTOFILL
-# -------------------------------------------------
-prev_order = None
-cust_orders = [o for o in orders.values() if o.get("customer") == customer]
+# ---------------------------------------------------
+# 1️⃣ CUSTOMER BLOCK
+# ---------------------------------------------------
+st.header("1️⃣ Customer Information")
+
+col1, col2 = st.columns(2)
+with col1:
+    customer_input = st.text_input("Customer Name (Required)", placeholder="e.g., ABC Traders")
+with col2:
+    customer_phone_input = st.text_input("Customer Phone (Required)", placeholder="e.g., 9312215239")
+    customer_email_input = st.text_input("Customer Email (Optional)", placeholder="e.g., contact@abctraders.com")
+
+st.markdown("---")
+
+
+# ---------------------------------------------------
+# 🔁 REPEAT ORDER AUTOFILL (Handles Repeat Customers)
+# ---------------------------------------------------
+previous_order = None
+cust_orders = [
+    o for o in all_orders.values()
+    if o.get("customer") == customer_input
+]
 
 if cust_orders:
-    st.subheader("Previous Order (Optional)")
-    opts = [f"{o['order_id']} — {o.get('item','')}" for o in cust_orders]
-    selected = st.selectbox("Select", ["---"] + opts)
+    st.subheader("🔁 Repeat Order Autofill")
+    repeat_container = st.container(border=True)
+    with repeat_container:
+        st.markdown("**Load Details from a Previous Order**")
+        options = [f"{o['order_id']} — {o.get('item','[No Description]')}" for o in cust_orders]
+        sel = st.selectbox("Choose Previous Order", ["--- Select ---"] + options, label_visibility="collapsed")
 
-    if selected != "---":
-        oid = selected.split("—")[0].strip()
-        prev_order = next(o for o in cust_orders if o["order_id"] == oid)
-        st.success("Auto-fill Applied!")
+        if sel != "--- Select ---":
+            sel_id = sel.split("—")[0].strip()
+            previous_order = next((o for o in cust_orders if o["order_id"] == sel_id), None)
+            st.info(f"Loaded details from order **{sel_id}**.")
+            
+st.markdown("---")
 
-
-# -------------------------------------------------
-# ORDER FORM
-# -------------------------------------------------
-st.subheader("3️⃣ Order Specification")
-
+# ---------------------------------------------------
+# 2️⃣ ORDER FORM
+# ---------------------------------------------------
 with st.form("order_form"):
-
+    
+    st.header("2️⃣ Order Specification")
     order_id = generate_order_id()
-    st.text_input("Order ID", order_id, disabled=True)
+    st.info(f"**New Order ID:** `{order_id}`")
 
-    now = datetime.now(timezone(timedelta(hours=5, minutes=30))).time()
+    prev = previous_order or {}
+    
+    # Dates & Core Details
+    st.subheader("Core Details")
+    colA, colB, colC, colD = st.columns(4)
 
-    recv_date = st.date_input("Received Date", date.today())
-    due_date = st.date_input("Due Date", date.today())
+    now_ist = datetime.now(IST).time() 
 
-    recv_dt = f"{recv_date} {now} IST"
-    due_dt = f"{due_date} {now} IST"
+    with colA:
+        receive_date = st.date_input("📥 Received Date", value=date.today())
+    with colB:
+        due_date = st.date_input("📤 Due Date", value=date.today())
+        
+    receive_dt = datetime.combine(receive_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
+    due_dt = datetime.combine(due_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
 
-    # ---------------------------
-    # PRODUCT TYPE (NO AUTOSELECT)
-    # ---------------------------
-    if "selected_product_type" not in st.session_state:
-        st.session_state.selected_product_type = "Select Product Type"
+    with colC:
+        priority = st.select_slider(
+            "Priority", 
+            options=["Low", "Medium", "High"],
+            value=prev.get("priority", "Medium")
+        )
+    with colD:
+        advance_value = prev.get("advance", "No")
+        advance = st.radio(
+            "Advance Received?", 
+            ["Yes", "No"], 
+            horizontal=True, 
+            index=["Yes", "No"].index(advance_value) if advance_value in ["Yes", "No"] else 1
+        )
 
-    product_type = st.selectbox(
-        "Product Type",
-        ["Select Product Type", "Bag", "Box"],
-        index=["Select Product Type", "Bag", "Box"].index(st.session_state.selected_product_type),
+
+    # Product Type, Category, Quantity
+    st.divider()
+    st.subheader("Product & Quantity")
+    col5, col6, col7 = st.columns(3)
+    
+    product_type_options = ["--- Select Type ---"] + sorted(list(categories.keys()))
+    
+    # Check for previous selection (from autofill)
+    initial_pt = prev.get("product_type", product_type_options[0])
+    pt_index = product_type_options.index(initial_pt) if initial_pt in product_type_options else 0
+    
+    with col5:
+        product_type = st.selectbox(
+            "Product Type",
+            product_type_options,
+            index=pt_index,
+            key="product_type_select" 
+        )
+
+    # ---------------------------------------------------
+    # HIDE/SHOW CATEGORY LOGIC (col6)
+    # ---------------------------------------------------
+    # Initialize category to None (will only be set if conditions are met)
+    category = None 
+    
+    is_product_type_selected = product_type and product_type != "--- Select Type ---"
+
+    with col6:
+        # Check if a valid product type is selected
+        if is_product_type_selected:
+            category_list = categories.get(product_type, [])
+            
+            if category_list:
+                
+                # Use the previous category for autofill, otherwise use the first in the list
+                default_cat = prev.get("category", category_list[0])
+                
+                # Check if the default category is in the current list
+                try:
+                    cat_index = category_list.index(default_cat)
+                except ValueError:
+                    # If product type changed, old category won't be found. Reset index to 0.
+                    cat_index = 0
+                
+                # This is the visible dropdown
+                category = st.selectbox(
+                    "Product Category",
+                    category_list,
+                    index=cat_index,
+                    key=f"category_select_{product_type}" # Dynamic key forces reset
+                )
+            else:
+                st.warning(f"No categories found for {product_type}. Add categories in sidebar.")
+        else:
+            # When no valid type is selected, display an empty space
+            st.text_input("Product Category", value="Select a Product Type first", disabled=True) 
+
+    with col7:
+        qty = st.number_input("Quantity", min_value=1, value=int(prev.get("qty", 1)))
+    # ---------------------------------------------------
+    
+    # ---------------------------------------------------
+    # DEBUGGING STATEMENT 🛠️
+    # ---------------------------------------------------
+    st.sidebar.code(f"""
+        Product Type: {product_type}
+        Category: {category}
+        Is Type Selected: {is_product_type_selected}
+        Category List: {categories.get(product_type, 'N/A')}
+    """)
+    # ---------------------------------------------------
+
+    item = st.text_area(
+        "Product Description (Detailed specifications, content, etc.)", 
+        value=prev.get("item", ""), 
+        height=100
     )
 
-    # Detect change
-    if product_type != st.session_state.selected_product_type:
-        st.session_state.selected_product_type = product_type
-        st.session_state.selected_category = None
-        st.rerun()
 
-    # ---------------------------
-    # PRODUCT CATEGORY (SHOW ONLY AFTER TYPE)
-    # ---------------------------
-    category = ""
+    # Technical Specs (Expander for cleanliness)
+    st.divider()
+    st.subheader("Manufacturing Specifications")
 
-    if st.session_state.selected_product_type in ["Bag", "Box"]:
-        cat_list = categories.get(st.session_state.selected_product_type, [])
+    with st.expander("📐 Technical IDs and Finishes (Click to expand)"):
+        col_id_1, col_id_2, col_id_3 = st.columns(3)
+        with col_id_1:
+            board = st.text_input("Board Thickness ID", value=prev.get("board_thickness_id", ""))
+        with col_id_2:
+            paper = st.text_input("Paper Thickness ID", value=prev.get("paper_thickness_id", ""))
+        with col_id_3:
+            size = st.text_input("Size ID", value=prev.get("size_id", ""))
 
-        if cat_list:
-            category = st.selectbox(
-                "Product Category",
-                cat_list,
-                index=0 if st.session_state.selected_category is None else
-                      cat_list.index(st.session_state.selected_category)
+        col_finish_1, col_finish_2 = st.columns(2)
+        with col_finish_1:
+            foil_value = prev.get("foil_id", "No")
+            foil = st.radio(
+                "Foil Required?", 
+                ["No", "Yes"], 
+                horizontal=True, 
+                index=["No", "Yes"].index(foil_value) if foil_value in ["No", "Yes"] else 0
+            )
+        with col_finish_2:
+            spotuv_value = prev.get("spotuv_id", "No")
+            spotuv = st.radio(
+                "Spot UV Required?", 
+                ["No", "Yes"], 
+                horizontal=True, 
+                index=["No", "Yes"].index(spotuv_value) if spotuv_value in ["No", "Yes"] else 0
             )
 
-            if category != st.session_state.get("selected_category"):
-                st.session_state.selected_category = category
 
-        else:
-            st.warning("No categories found. Add some above.")
+    # Pricing & Submit
+    st.divider()
+    st.subheader("Pricing")
+    
+    colP, colT = st.columns([1, 2])
+    with colP:
+        rate = st.number_input(
+            "Unit Rate ₹", 
+            min_value=0.0, 
+            value=float(prev.get("rate", 0)), 
+            step=0.01, 
+            format="%.2f"
+        )
+    
+    total_value = qty * rate
 
-    # -------------------------------------------
-    # REMAINING ORDER FIELDS
-    # -------------------------------------------
-    col1, col2, col3 = st.columns(3)
+    with colT:
+        st.metric("Total Order Value", f"₹{total_value:,.2f}", delta_color="off")
 
-    with col1:
-        qty = st.number_input("Quantity", min_value=1)
-    with col2:
-        priority = st.selectbox("Priority", ["High", "Medium", "Low"])
-    with col3:
-        advance = st.radio("Advance Received?", ["Yes", "No"])
 
-    item = st.text_area("Product Description")
-    board = st.text_input("Board Thickness ID")
-    paper = st.text_input("Paper Thickness ID")
-    size = st.text_input("Size ID")
+    st.markdown("---")
+    submitted = st.form_submit_button("🚀 Create and Finalize Order", use_container_width=True)
 
-    foil = st.radio("Foil Required?", ["No", "Yes"])
-    uv = st.radio("Spot UV Required?", ["No", "Yes"])
-
-    rate = st.number_input("Unit Rate ₹", min_value=0.0)
-    st.metric("Total Value", f"₹{qty * rate:,}")
-
-    submit = st.form_submit_button("🚀 Create Order")
-
-    if submit:
-
-        if product_type == "Select Product Type":
-            st.error("Please select a Product Type!")
+    if submitted:
+        # --- Validation ---
+        if not customer_input:
+            st.error("Customer Name required")
+            st.stop()
+        if not customer_phone_input:
+            st.error("Phone required")
+            st.stop()
+        if product_type == "--- Select Type ---":
+            st.error("Please select a Product Type.")
+            st.stop()
+        # Ensure category is not None (it will be None if the dropdown was hidden)
+        if not category:
+            st.error("Product Category required")
             st.stop()
 
-        if not st.session_state.selected_category:
-            st.error("Please select a Product Category!")
-            st.stop()
-
-        qr = generate_qr_base64(order_id)
+        # --- Data Generation ---
+        qr_b64 = generate_qr_base64(order_id)
 
         data = {
             "order_id": order_id,
-            "customer": customer,
-            "customer_phone": phone,
-            "customer_email": email,
-            "product_type": st.session_state.selected_product_type,
-            "category": st.session_state.selected_category,
-            "qty": qty,
+            "customer": customer_input,
+            "customer_phone": customer_phone_input,
+            "customer_email": customer_email_input,
+            "product_type": product_type,
+            "category": category,
             "priority": priority,
+            "qty": qty,
             "item": item,
-            "received": recv_dt,
+            "received": receive_dt,
             "due": due_dt,
             "advance": advance,
             "board_thickness_id": board,
             "paper_thickness_id": paper,
             "size_id": size,
             "foil_id": foil,
-            "spotuv_id": uv,
+            "spotuv_id": spotuv,
             "rate": rate,
-            "stage": "Design",
-            "order_qr": qr
+            "stage": "Design", 
+            "order_qr": qr_b64,
         }
 
         push("orders", data)
 
-        pdf_path = generate_order_pdf(data, qr)
+        pdf_path = generate_order_pdf(data, qr_b64)
+        
         with open(pdf_path, "rb") as f:
-            st.session_state["pdf"] = f.read()
+            pdf_bytes = f.read()
+            st.session_state["last_order_pdf"] = pdf_bytes
 
-        st.session_state["oid"] = order_id
-        st.session_state["wa"] = get_whatsapp(phone, order_id, customer)
-        st.session_state["qr"] = qr
-        st.session_state["ok"] = True
+        if os.path.exists(pdf_path):
+            os.unlink(pdf_path)
+
+
+        # --- Session State Update ---
+        st.session_state["last_order_id"] = order_id
+        st.session_state["last_qr"] = qr_b64
+        st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone_input, order_id, customer_input)
+        st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
+        st.session_state["order_created_flag"] = True
 
         st.rerun()
 
 
-# -------------------------------------------------
-# SUCCESS VIEW
-# -------------------------------------------------
-if st.session_state.get("ok"):
+# ---------------------------------------------------
+# SUCCESS BLOCK
+# ---------------------------------------------------
+if st.session_state.get("order_created_flag"):
+    st.balloons()
+    
+    st.success(f"🎉 Order **{st.session_state['last_order_id']}** Created Successfully! What's next?")
+    
+    col_pdf, col_wa = st.columns(2)
+    
+    with col_pdf:
+        st.download_button(
+            label="📄 Download Order PDF",
+            data=st.session_state["last_order_pdf"],
+            file_name=f"{st.session_state['last_order_id']}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        
+    with col_wa:
+        st.markdown(
+            f"""
+            <a href="{st.session_state['last_whatsapp']}" target="_blank">
+                <button style='width: 100%; height: 38px; background-color: #25D366; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>
+                    💬 Send Confirmation via WhatsApp
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
 
-    st.success(f"🎉 Order {st.session_state['oid']} Created Successfully!")
+    st.markdown("---")
 
-    st.download_button(
-        "📄 Download PDF",
-        st.session_state["pdf"],
-        file_name=f"{st.session_state['oid']}.pdf",
-        mime="application/pdf"
-    )
-
-    st.image(base64.b64decode(st.session_state["qr"]), width=160)
-
-    st.markdown(f"[💬 Send via WhatsApp]({st.session_state['wa']})")
+    col_qr, col_track = st.columns([1, 2])
+    with col_qr:
+        st.image(
+            base64.b64decode(st.session_state["last_qr"]), 
+            caption=f"QR for Order {st.session_state['last_order_id']}", 
+            width=150
+        )
+    
+    with col_track:
+        st.markdown(f"**Tracking Link:**")
+        st.code(st.session_state["last_tracking"], language=None)
+        st.info("Share this link with your production team or customer for real-time tracking.")
