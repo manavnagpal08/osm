@@ -14,6 +14,7 @@ from reportlab.lib.pagesizes import A4
 import tempfile
 
 
+
 # ---------------------------------------------------
 # CONFIG
 # ---------------------------------------------------
@@ -40,6 +41,7 @@ def generate_qr_base64(order_id: str):
     return base64.b64encode(buf.getvalue()).decode()
 
 
+
 # ---------------------------------------------------
 # WHATSAPP LINK
 # ---------------------------------------------------
@@ -58,8 +60,9 @@ def get_whatsapp_link(phone, order_id, customer):
     return f"https://wa.me/{clean_phone}?text={encoded}"
 
 
+
 # ---------------------------------------------------
-# EMAIL SENDER
+# EMAIL
 # ---------------------------------------------------
 def send_gmail(to, subject, html):
     msg = MIMEMultipart("alternative")
@@ -69,7 +72,7 @@ def send_gmail(to, subject, html):
     msg.attach(MIMEText(html, "html"))
 
     try:
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server = smtpltp.SMTP_SSL("smtp.gmail.com", 465)
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, to, msg.as_string())
         server.quit()
@@ -79,8 +82,9 @@ def send_gmail(to, subject, html):
         return False
 
 
+
 # ---------------------------------------------------
-# PDF GENERATOR (unchanged)
+# PDF GENERATOR (UNCHANGED)
 # ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
     logo_path = "srplogo.png"
@@ -91,20 +95,14 @@ def generate_order_pdf(data, qr_b64):
     x_margin = 40
     HEADER_HEIGHT = 160
 
-    # Header background
+    # Header BG
     c.setFillColorRGB(0.05, 0.48, 0.22)
     c.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, stroke=0, fill=1)
 
     # Logo
     try:
-        c.drawImage(
-            logo_path,
-            x_margin,
-            height - HEADER_HEIGHT + 30,
-            width=130,
-            preserveAspectRatio=True,
-            mask="auto"
-        )
+        c.drawImage(logo_path, x_margin, height - HEADER_HEIGHT + 30, width=130,
+                    preserveAspectRatio=True, mask="auto")
     except:
         pass
 
@@ -125,28 +123,22 @@ def generate_order_pdf(data, qr_b64):
 
     info_y = top_y - 55
     c.setFont("Helvetica", 12)
-    for line in [
-        "Mobile: 9312215239",
-        "GSTIN: 29BCIPK6225L1Z6",
-        "Website: https://srppackaging.com/"
-    ]:
+    for line in ["Mobile: 9312215239", "GSTIN: 29BCIPK6225L1Z6", "Website: https://srppackaging.com/"]:
         c.drawString(left_block_x, info_y, line)
         info_y -= 18
 
     c.setStrokeColorRGB(0.07, 0.56, 0.27)
     c.setLineWidth(3)
-    c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin, height - HEADER_HEIGHT - 10)
+    c.line(x_margin, height - HEADER_HEIGHT - 10, width - x_margin,
+           height - HEADER_HEIGHT - 10)
 
     c.setFillColorRGB(0, 0, 0)
     y = height - HEADER_HEIGHT - 40
 
-
-    # Customer details
+    # Customer Info
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Customer Details")
-    y -= 20
-    c.line(x_margin, y, width - x_margin, y)
-    y -= 15
+    y -= 35
 
     for label, value in [
         ("Customer Name", data["customer"]),
@@ -161,14 +153,12 @@ def generate_order_pdf(data, qr_b64):
         c.drawString(x_margin + 150, y, str(value))
         y -= 18
 
-    y -= 15
+    y -= 20
 
-    # Order details
+    # Order Info
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x_margin, y, "Order Details")
-    y -= 20
-    c.line(x_margin, y, width - x_margin, y)
-    y -= 20
+    y -= 35
 
     for label, value in [
         ("Product Type", data["product_type"]),
@@ -177,8 +167,8 @@ def generate_order_pdf(data, qr_b64):
         ("Quantity", data["qty"]),
         ("Rate (₹)", data["rate"]),
         ("Advance Received", data["advance"]),
-        ("Board Thickness ID", data["board_thickness_id"]),
-        ("Paper Thickness ID", data["paper_thickness_id"]),
+        ("Board Thickness", data["board_thickness_id"]),
+        ("Paper Thickness", data["paper_thickness_id"]),
         ("Size ID", data["size_id"]),
         ("Foil", data["foil_id"]),
         ("Spot UV", data["spotuv_id"]),
@@ -189,22 +179,18 @@ def generate_order_pdf(data, qr_b64):
         c.setFont("Helvetica", 11)
         c.drawString(x_margin + 180, y, str(value))
         y -= 18
-        if y < 140:
-            c.showPage()
-            y = height - 80
 
-    y -= 20
-
-    # QR code
+    # QR
+    y -= 30
     qr_img = base64.b64decode(qr_b64)
     qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     qr_temp.write(qr_img)
     qr_temp.close()
-
     c.drawImage(qr_temp.name, width - 180, y, width=130, height=130)
 
     c.save()
     return temp_file.name
+
 
 
 # ---------------------------------------------------
@@ -213,15 +199,16 @@ def generate_order_pdf(data, qr_b64):
 st.title("📦 Create New Manufacturing Order")
 
 all_orders = read("orders") or {}
-customer_list = sorted(list(set(
+customer_list = sorted({
     o.get("customer", "").strip()
     for o in all_orders.values()
     if isinstance(o, dict)
-)))
+})
+
 
 
 # ---------------------------------------------------
-# LOAD / CREATE PRODUCT CATEGORIES
+# LOAD PRODUCT CATEGORIES
 # ---------------------------------------------------
 categories = read("product_categories") or {}
 
@@ -230,13 +217,14 @@ default_categories = {
     "Bag": ["Paper Bags", "SOS Envelopes"]
 }
 
-for t in ["Box", "Bag"]:
+for t in default_categories:
     if t not in categories:
         categories[t] = default_categories[t]
 
 
+
 # ---------------------------------------------------
-# CATEGORY MANAGEMENT (Admin)
+# CATEGORY ADMIN PANEL
 # ---------------------------------------------------
 st.subheader("⚙️ Manage Product Categories")
 
@@ -248,62 +236,52 @@ with st.expander("Add New Category"):
         if new_cat.strip():
             if new_cat not in categories[type_choice]:
                 categories[type_choice].append(new_cat)
-
                 update("product_categories", categories)
-
-                st.success("Category added!")
+                st.success("Category added successfully!")
                 st.rerun()
             else:
                 st.warning("Category already exists.")
 
 
+
 # ---------------------------------------------------
-# STEP 1 — CUSTOMER BLOCK
+# CUSTOMER BLOCK
 # ---------------------------------------------------
 box = st.container(border=True)
 with box:
     st.subheader("1️⃣ Customer Information")
     st.divider()
 
-    col1, col2 = st.columns(2)
+    customer_input = st.text_input("Customer Name (Required)")
+    customer_phone_input = st.text_input("Customer Phone (Required)")
+    customer_email_input = st.text_input("Customer Email")
 
-    with col1:
-        order_type = st.radio("Order Type", ["New Order 🆕", "Repeat Order 🔄"], horizontal=True)
-        order_type_simple = "New" if order_type.startswith("New") else "Repeat"
-
-    with col2:
-        customer_input = st.text_input("Customer Name")
-        customer_phone_input = st.text_input("Customer Phone")
-        customer_email_input = st.text_input("Customer Email")
 
 
 # ---------------------------------------------------
-# STEP 2 — REPEAT ORDER AUTO-FILL
+# REPEAT ORDER AUTOFILL
 # ---------------------------------------------------
 previous_order = None
 
-if order_type_simple == "Repeat" and customer_input:
-    cust_orders = [
-        o for o in all_orders.values()
-        if o.get("customer") == customer_input
-    ]
+cust_orders = [
+    o for o in all_orders.values()
+    if o.get("customer") == customer_input
+]
 
-    if cust_orders:
-        st.subheader("2️⃣ Select Previous Order")
-        options = [f"{o['order_id']} — {o['item']}" for o in cust_orders]
-        sel = st.selectbox("Choose", ["--- Select ---"] + options)
+if cust_orders:
+    st.subheader("Select Previous Order (Optional)")
+    options = [f"{o['order_id']} — {o.get('item','')}" for o in cust_orders]
+    sel = st.selectbox("Choose", ["--- Select ---"] + options)
 
-        if sel != "--- Select ---":
-            sel_id = sel.split("—")[0].strip()
-            for o in cust_orders:
-                if o["order_id"] == sel_id:
-                    previous_order = o
-                    st.success("Auto-fill applied!")
-                    break
+    if sel != "--- Select ---":
+        sel_id = sel.split("—")[0].strip()
+        previous_order = next((o for o in cust_orders if o["order_id"] == sel_id), None)
+        st.success("Auto-fill applied!")
+
 
 
 # ---------------------------------------------------
-# STEP 3 — MAIN ORDER FORM
+# ORDER FORM
 # ---------------------------------------------------
 with st.form("order_form"):
 
@@ -315,7 +293,7 @@ with st.form("order_form"):
 
     prev = previous_order or {}
 
-    # DATE INPUTS (IST)
+    # Dates (IST)
     IST = timezone(timedelta(hours=5, minutes=30))
     now_ist = datetime.now(IST).time()
 
@@ -325,20 +303,27 @@ with st.form("order_form"):
     receive_dt = datetime.combine(receive_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
     due_dt = datetime.combine(due_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
 
-    # PRODUCT TYPE
+    # Product Type
     product_type = st.selectbox(
-        "Product Type",
+        "Product Type (Select First)",
         ["Bag", "Box"],
         index=["Bag", "Box"].index(prev.get("product_type", "Bag"))
     )
 
-    # CATEGORY
-    category_list = categories.get(product_type, [])
-    category = st.selectbox(
-        "Product Category",
-        category_list,
-        index=category_list.index(prev.get("category", category_list[0]))
-    )
+    # Product Category — show only AFTER selecting product type
+    category = None
+    if product_type:
+        category_list = categories.get(product_type, [])
+
+        if category_list:
+            category = st.selectbox(
+                "Product Category",
+                category_list,
+                index=category_list.index(prev.get("category", category_list[0]))
+                if prev.get("category") in category_list else 0
+            )
+        else:
+            st.warning(f"No categories found for {product_type}. Add categories above.")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -350,15 +335,14 @@ with st.form("order_form"):
 
     item = st.text_area("Product Description", value=prev.get("item", ""))
 
-    # BOARD / PAPER / SIZE
+    # IDs
     board = st.text_input("Board Thickness ID", value=prev.get("board_thickness_id", ""))
     paper = st.text_input("Paper Thickness ID", value=prev.get("paper_thickness_id", ""))
     size = st.text_input("Size ID", value=prev.get("size_id", ""))
 
-    # FOIL & UV YES/NO
+    # Foil / Spot UV YES/NO
     foil = st.radio("Foil Required?", ["No", "Yes"])
     spotuv = st.radio("Spot UV Required?", ["No", "Yes"])
-
 
     rate = st.number_input("Unit Rate ₹", min_value=0.0, value=float(prev.get("rate", 0)))
     total_value = qty * rate
@@ -382,9 +366,8 @@ with st.form("order_form"):
             "customer": customer_input,
             "customer_phone": customer_phone_input,
             "customer_email": customer_email_input,
-            "type": order_type_simple,
             "product_type": product_type,
-            "category": category,
+            "category": category if category else "",
             "priority": priority,
             "qty": qty,
             "item": item,
@@ -414,6 +397,7 @@ with st.form("order_form"):
         st.session_state["order_created_flag"] = True
 
         st.rerun()
+
 
 
 # ---------------------------------------------------
