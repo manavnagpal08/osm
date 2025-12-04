@@ -1,5 +1,5 @@
 import streamlit as st
-# 👇 USING REAL IMPORTS NOW
+# 👇 USING REAL IMPORTS
 from firebase import read, push, update 
 from utils import generate_order_id
 from datetime import date, datetime, timezone, timedelta
@@ -22,9 +22,8 @@ import time
 # ---------------------------------------------------
 st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_icon="📦")
 
-# WARNING: Replace with your actual credentials!
 GMAIL_USER = "yourgmail@gmail.com" 
-GMAIL_PASS = "your_app_password" # Use App Password, not main password
+GMAIL_PASS = "your_app_password" 
 
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
@@ -230,7 +229,6 @@ def generate_order_pdf(data, qr_b64):
 st.title("📦 Manufacturing Order Management")
 st.caption("Create and track new production orders for Shree Ram Packers.")
 
-# 👇 READING REAL DATA
 all_orders = read("orders") or {}
 customer_list = sorted({
     o.get("customer", "").strip()
@@ -313,7 +311,6 @@ if cust_orders:
 
         if sel != "--- Select ---":
             sel_id = sel.split("—")[0].strip()
-            # Find the order dictionary that matches the selected ID
             previous_order = next((o for o in cust_orders if o["order_id"] == sel_id), None)
             st.info(f"Loaded details from order **{sel_id}**.")
             
@@ -325,7 +322,6 @@ st.markdown("---")
 with st.form("order_form"):
     
     st.header("2️⃣ Order Specification")
-    # 👇 GENERATING REAL ORDER ID
     order_id = generate_order_id()
     st.info(f"**New Order ID:** `{order_id}`")
 
@@ -366,47 +362,55 @@ with st.form("order_form"):
     st.subheader("Product & Quantity")
     col5, col6, col7 = st.columns(3)
     
+    product_type_options = ["Select Type"] + ["Bag", "Box"]
+    # Determine initial selection index based on previous order, or 'Select Type' (index 0)
+    initial_pt = prev.get("product_type", "Select Type")
+    pt_index = product_type_options.index(initial_pt) if initial_pt in product_type_options else 0
+    
     with col5:
-        default_pt = prev.get("product_type", "Box")
-        pt_options = ["Bag", "Box"]
-        pt_index = pt_options.index(default_pt) if default_pt in pt_options else 1
-
+        # HIDE CATEGORY LOGIC: Product Type now includes a placeholder 'Select Type'
         product_type = st.selectbox(
             "Product Type",
-            pt_options,
+            product_type_options,
             index=pt_index,
             key="product_type_select" 
         )
 
-    # FIX FOR CATEGORY NOT UPDATING: Dynamic key and index calculation
-    category = ""
-    category_list = categories.get(product_type, [])
-
-    with col6:
-        if category_list:
-            
-            # Determine the default category from the previous order (prev)
-            default_cat = prev.get("category", category_list[0])
-            
-            # Check if the default category is actually in the NEW category_list.
-            try:
-                cat_index = category_list.index(default_cat)
-            except ValueError:
-                # If the old category is not found (Product Type changed), default to 0.
-                cat_index = 0
-            
-            category = st.selectbox(
-                "Product Category",
-                category_list,
-                index=cat_index,
-                # Dynamic key forces reset when product_type changes!
-                key=f"category_select_{product_type}" 
-            )
-        else:
-            st.warning(f"No categories found for {product_type}. Add categories in sidebar.")
+    # ---------------------------------------------------
+    # HIDE/SHOW CATEGORY LOGIC (col6)
+    # ---------------------------------------------------
+    category = None
+    if product_type and product_type != "Select Type":
+        category_list = categories.get(product_type, [])
+        
+        with col6:
+            if category_list:
+                
+                # Determine the default category from the previous order (prev)
+                default_cat = prev.get("category", category_list[0])
+                
+                # Check if the default category is actually in the NEW category_list.
+                try:
+                    cat_index = category_list.index(default_cat)
+                except ValueError:
+                    cat_index = 0
+                
+                category = st.selectbox(
+                    "Product Category",
+                    category_list,
+                    index=cat_index,
+                    key=f"category_select_{product_type}" 
+                )
+            else:
+                st.warning(f"No categories found for {product_type}. Add categories in sidebar.")
+    else:
+        # If no type is selected, show an empty placeholder in the column
+        with col6:
+            st.empty() 
 
     with col7:
         qty = st.number_input("Quantity", min_value=1, value=int(prev.get("qty", 1)))
+    # ---------------------------------------------------
 
     item = st.text_area(
         "Product Description (Detailed specifications, content, etc.)", 
@@ -478,6 +482,9 @@ with st.form("order_form"):
         if not customer_phone_input:
             st.error("Phone required")
             st.stop()
+        if product_type == "Select Type":
+            st.error("Please select a Product Type.")
+            st.stop()
         if not category:
             st.error("Product Category required")
             st.stop()
@@ -508,7 +515,6 @@ with st.form("order_form"):
             "order_qr": qr_b64,
         }
 
-        # 👇 PUSHING REAL DATA
         push("orders", data)
 
         pdf_path = generate_order_pdf(data, qr_b64)
