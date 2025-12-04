@@ -16,7 +16,6 @@ import tempfile
 import os 
 import time 
 
-
 # ---------------------------------------------------
 # CONFIG
 # ---------------------------------------------------
@@ -33,10 +32,10 @@ if "last_order_pdf" not in st.session_state:
 
 # Set IST timezone once
 IST = timezone(timedelta(hours=5, minutes=30))
-
+PLACEHOLDER = "--- Select Type ---" # Define constant placeholder
 
 # ---------------------------------------------------
-# QR GENERATOR
+# QR GENERATOR (Functions remain the same)
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
     tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
@@ -48,9 +47,8 @@ def generate_qr_base64(order_id: str):
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
-
 # ---------------------------------------------------
-# WHATSAPP LINK
+# WHATSAPP LINK (Function remains the same)
 # ---------------------------------------------------
 def get_whatsapp_link(phone, order_id, customer):
     clean_phone = "".join(filter(str.isdigit, phone))
@@ -66,9 +64,8 @@ def get_whatsapp_link(phone, order_id, customer):
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
 
-
 # ---------------------------------------------------
-# EMAIL
+# EMAIL (Function remains the same)
 # ---------------------------------------------------
 def send_gmail(to, subject, html):
     msg = MIMEMultipart("alternative")
@@ -87,9 +84,8 @@ def send_gmail(to, subject, html):
         st.error(f"Email Error: {e}")
         return False
 
-
 # ---------------------------------------------------
-# PDF GENERATOR
+# PDF GENERATOR (Function remains the same)
 # ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
     logo_path = "srplogo.png" 
@@ -369,10 +365,11 @@ with st.form("order_form"):
     st.subheader("Product & Quantity")
     col5, col6, col7 = st.columns(3)
     
-    product_type_options = ["--- Select Type ---"] + sorted(list(categories.keys()))
+    # --- FIX 1: Ensure Product Type list and index are handled correctly ---
+    product_type_options = [PLACEHOLDER] + sorted(list(categories.keys()))
     
-    # Check for previous selection (from autofill)
-    initial_pt = prev.get("product_type", product_type_options[0])
+    # Use previous type if available, otherwise use the PLACEHOLDER
+    initial_pt = prev.get("product_type", PLACEHOLDER)
     pt_index = product_type_options.index(initial_pt) if initial_pt in product_type_options else 0
     
     with col5:
@@ -386,29 +383,24 @@ with st.form("order_form"):
     # ---------------------------------------------------
     # HIDE/SHOW CATEGORY LOGIC (col6)
     # ---------------------------------------------------
-    # Initialize category to None (will only be set if conditions are met)
     category = None 
-    
-    is_product_type_selected = product_type and product_type != "--- Select Type ---"
+    is_product_type_selected = product_type and product_type != PLACEHOLDER
 
     with col6:
-        # Check if a valid product type is selected
+        
+        # --- FIX 2: Check for valid selection BEFORE attempting to draw category list ---
         if is_product_type_selected:
             category_list = categories.get(product_type, [])
             
             if category_list:
                 
-                # Use the previous category for autofill, otherwise use the first in the list
                 default_cat = prev.get("category", category_list[0])
                 
-                # Check if the default category is in the current list
                 try:
                     cat_index = category_list.index(default_cat)
                 except ValueError:
-                    # If product type changed, old category won't be found. Reset index to 0.
                     cat_index = 0
                 
-                # This is the visible dropdown
                 category = st.selectbox(
                     "Product Category",
                     category_list,
@@ -418,8 +410,8 @@ with st.form("order_form"):
             else:
                 st.warning(f"No categories found for {product_type}. Add categories in sidebar.")
         else:
-            # When no valid type is selected, display an empty space
-            st.text_input("Product Category", value="Select a Product Type first", disabled=True) 
+            # Display informational message when no type is selected
+            st.info("Select a Product Type first") 
 
     with col7:
         qty = st.number_input("Quantity", min_value=1, value=int(prev.get("qty", 1)))
@@ -429,10 +421,11 @@ with st.form("order_form"):
     # DEBUGGING STATEMENT 🛠️
     # ---------------------------------------------------
     st.sidebar.code(f"""
-        Product Type: {product_type}
-        Category: {category}
+        Product Type: '{product_type}'
+        Category: '{category}'
         Is Type Selected: {is_product_type_selected}
         Category List: {categories.get(product_type, 'N/A')}
+        PT Options: {product_type_options}
     """)
     # ---------------------------------------------------
 
@@ -506,7 +499,7 @@ with st.form("order_form"):
         if not customer_phone_input:
             st.error("Phone required")
             st.stop()
-        if product_type == "--- Select Type ---":
+        if product_type == PLACEHOLDER:
             st.error("Please select a Product Type.")
             st.stop()
         # Ensure category is not None (it will be None if the dropdown was hidden)
