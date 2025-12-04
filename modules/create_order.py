@@ -25,24 +25,28 @@ st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_
 GMAIL_USER = "yourgmail@gmail.com" 
 GMAIL_PASS = "your_app_password" 
 
+# Session State Initialization
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
-
 if "last_order_pdf" not in st.session_state:
     st.session_state["last_order_pdf"] = None
-
 if "current_product_type" not in st.session_state:
     st.session_state["current_product_type"] = None
+# Initialization for the New/Repeat flow
+if "order_type" not in st.session_state:
+    st.session_state["order_type"] = "New Order 🆕"
 
-# Define constant placeholder
+# Customer input values (for New Order persistence)
+for key in ["customer_input", "customer_phone_input", "customer_email_input"]:
+    if key not in st.session_state:
+        st.session_state[key] = ""
+
 PLACEHOLDER = "--- Select Type ---" 
-
-# Set IST timezone once
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
 # ---------------------------------------------------
-# HELPER FUNCTIONS (No changes needed here)
+# HELPER FUNCTIONS (PDF function checked for robustness)
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
     tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
@@ -67,123 +71,192 @@ def get_whatsapp_link(phone, order_id, customer):
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
 
-def send_gmail(to, subject, html):
-    # ... (function body remains the same)
-    pass # Placeholder for brevity, keep the full function in your code
-
+# Note: Keeping the PDF generator simple for display, ensure your full version is used
 def generate_order_pdf(data, qr_b64):
-    # ... (function body remains the same)
-    # Ensure you keep the full PDF generation function
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    # Simplified return for example
-    return temp_file.name
+    qr_temp = None
+
+    try:
+        c = canvas.Canvas(temp_file.name, pagesize=A4)
+        width, height = A4
+        
+        # --- PDF Content Generation (Simplified for display) ---
+        c.drawString(40, height - 50, f"Order ID: {data['order_id']}")
+        c.drawString(40, height - 70, f"Customer: {data['customer']}")
+        c.drawString(40, height - 90, f"Product: {data['product_type']} / {data['category']}")
+        
+        # Add QR (decoded to temp file)
+        qr_img = base64.b64decode(qr_b64)
+        qr_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        qr_temp.write(qr_img)
+        qr_temp.close()
+        c.drawImage(qr_temp.name, width - 180, height - 150, width=100, height=100)
+
+        c.save()
+        return temp_file.name
+    
+    finally:
+        # Clean up temporary QR file
+        if qr_temp and os.path.exists(qr_temp.name):
+            os.unlink(qr_temp.name)
 
 
 # ---------------------------------------------------
 # LOAD DATA & INITIAL SETUP
 # ---------------------------------------------------
-st.title("📦 Manufacturing Order Management")
-st.caption("Create and track new production orders for Shree Ram Packers.")
+st.title("📦 Create New Manufacturing Order")
 
 all_orders = read("orders") or {}
-customer_list = sorted({
-    o.get("customer", "").strip()
-    for o in all_orders.values()
-    if isinstance(o, dict)
-})
+customer_list = sorted(list(set(
+    o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
+)))
 
-# Load Product Categories
 categories = read("product_categories") or {}
 default_categories = {
     "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
     "Bag": ["Paper Bags", "SOS Envelopes"]
 }
-# Fallback to defaults if DB is empty
 for t in default_categories:
     if t not in categories:
         categories[t] = default_categories[t]
 
+# Helper function to reset customer inputs when switching to Repeat
+def reset_customer_inputs():
+    if st.session_state.order_type == "Repeat Order 🔄":
+        st.session_state.customer_input = ""
+        st.session_state.customer_phone_input = ""
+        st.session_state.customer_email_input = ""
+
 
 # ---------------------------------------------------
-# CATEGORY ADMIN PANEL & DEBUG
+# STEP 1 — CUSTOMER BLOCK (Updated to use your flow)
 # ---------------------------------------------------
-st.sidebar.subheader("⚙️ Manage Product Categories")
+box = st.container(border=True)
+with box:
+    st.subheader("1️⃣ Customer Information")
+    st.divider()
 
-with st.sidebar.expander("Add/View Categories"):
-    type_choice_admin = st.selectbox("Select Product Type", ["Box", "Bag"], key="admin_type")
-    new_cat = st.text_input("New Category Name", key="admin_cat_name")
+    col1, col2 = st.columns(2)
 
-    if st.button("Add Category", key="admin_add_btn"):
-        if new_cat.strip():
-            new_cat_clean = new_cat.strip()
-            if new_cat_clean not in categories.get(type_choice_admin, []):
-                if type_choice_admin not in categories:
-                    categories[type_choice_admin] = []
-                categories[type_choice_admin].append(new_cat_clean)
-                update("product_categories", categories)
-                st.success(f"Category '{new_cat_clean}' added to {type_choice_admin}!")
-                st.rerun()
+    with col1:
+        # Use key and on_change to manage state transitions
+        order_type = st.radio(
+            "Order Type", 
+            ["New Order 🆕", "Repeat Order 🔄"], 
+            horizontal=True, 
+            key="order_type", 
+            on_change=reset_customer_inputs # Reset inputs when mode changes
+        )
+        order_type_simple = "New" if order_type.startswith("New") else "Repeat"
+
+    customer_input = st.session_state.customer_input
+    customer_phone_input = st.session_state.customer_phone_input
+    customer_email_input = st.session_state.customer_email_input
+
+    with col2:
+        if order_type_simple == "New":
+            # Direct two-way binding using key
+            customer_input = st.text_input("Customer Name (Required)", key="customer_input_new")
+            customer_phone_input = st.text_input("Customer Phone (Required)", key="customer_phone_input_new")
+            customer_email_input = st.text_input("Customer Email", key="customer_email_input_new")
+            
+            # Update session state after widget read
+            st.session_state.customer_input = customer_input
+            st.session_state.customer_phone_input = customer_phone_input
+            st.session_state.customer_email_input = customer_email_input
+            
+
+        else: # Repeat
+            # The selectbox will drive the customer_input value
+            selected = st.selectbox("Select Existing Customer", ["Select"] + customer_list, key="repeat_customer_select")
+            
+            if selected != "Select":
+                customer_input = selected.strip()
+                cust_orders = [
+                    o for o in all_orders.values()
+                    if o.get("customer") == customer_input
+                ]
+
+                if cust_orders:
+                    # Find latest order details for pre-filling phone/email
+                    latest = sorted(
+                        cust_orders,
+                        key=lambda x: x.get("received", "0000"),
+                        reverse=True
+                    )[0]
+
+                    # Update inputs based on latest order, but allow user to edit
+                    customer_phone_input = latest.get("customer_phone", "")
+                    customer_email_input = latest.get("customer_email", "")
+
+                # Update session state variables used for order creation
+                st.session_state.customer_input = customer_input
+                
+                # Display inputs allowing for last-minute edits
+                customer_phone_input = st.text_input("Phone", customer_phone_input, key="customer_phone_input_repeat")
+                customer_email_input = st.text_input("Email", customer_email_input, key="customer_email_input_repeat")
+                
+                st.session_state.customer_phone_input = customer_phone_input
+                st.session_state.customer_email_input = customer_email_input
+            
             else:
-                st.warning("Category already exists.")
+                 # If "Select" is chosen in Repeat mode, clear inputs
+                st.session_state.customer_input = ""
+                st.session_state.customer_phone_input = st.text_input("Phone", "", key="customer_phone_input_repeat_empty", disabled=True)
+                st.session_state.customer_email_input = st.text_input("Email", "", key="customer_email_input_repeat_empty", disabled=True)
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Current Categories:**")
-    for t, cats in categories.items():
-        st.sidebar.markdown(f"**{t}**:")
-        st.sidebar.write(", ".join(cats))
 
-# Debug panel for inspection
-st.sidebar.subheader("🐞 Debug Variables")
-st.sidebar.code(f"""
-    Session PT: '{st.session_state.current_product_type}'
-    PT Selectbox Key: 'product_type_select'
-    Category List: {categories.get(st.session_state.current_product_type, 'N/A')}
-""")
+# Get final customer details from session state for use in next steps
+final_customer_input = st.session_state.customer_input
+final_phone_input = st.session_state.customer_phone_input
+final_email_input = st.session_state.customer_email_input
 
 
 # ---------------------------------------------------
-# 1️⃣ CUSTOMER BLOCK
-# ---------------------------------------------------
-st.header("1️⃣ Customer Information")
-
-col1, col2 = st.columns(2)
-with col1:
-    customer_input = st.text_input("Customer Name (Required)", placeholder="e.g., ABC Traders", key="customer_name")
-with col2:
-    customer_phone_input = st.text_input("Customer Phone (Required)", placeholder="e.g., 9312215239", key="customer_phone")
-    customer_email_input = st.text_input("Customer Email (Optional)", placeholder="e.g., contact@abctraders.com", key="customer_email")
-
-st.markdown("---")
-
-
-# ---------------------------------------------------
-# 🔁 REPEAT ORDER AUTOFILL
+# STEP 2 — REPEAT ORDER AUTOFILL (Select Previous Order)
 # ---------------------------------------------------
 previous_order = None
-cust_orders = [
-    o for o in all_orders.values()
-    if o.get("customer") == customer_input
-]
 
-if cust_orders:
-    st.subheader("🔁 Repeat Order Autofill")
-    repeat_container = st.container(border=True)
-    with repeat_container:
-        st.markdown("**Load Details from a Previous Order**")
-        options = [f"{o['order_id']} — {o.get('item','[No Description]')}" for o in cust_orders]
-        sel = st.selectbox("Choose Previous Order", ["--- Select ---"] + options, key="repeat_order_select")
+if order_type_simple == "Repeat" and final_customer_input:
+    
+    cust_orders = [
+        o for o in all_orders.values()
+        if o.get("customer") == final_customer_input
+    ]
 
-        if sel != "--- Select ---":
+    if cust_orders:
+        st.subheader("2️⃣ Select Previous Order for Auto-fill")
+        
+        # Sort orders by date for display
+        cust_orders.sort(
+            key=lambda x: x.get("received", "0000"),
+            reverse=True
+        )
+        
+        options = ["--- Select for Auto-fill ---"] + [
+            f"{o['order_id']} — {o.get('item', '[No Description]')}" 
+            for o in cust_orders
+        ]
+        
+        sel = st.selectbox("Choose Previous Order", options, key="autofill_order_select")
+
+        if sel != "--- Select for Auto-fill ---":
             sel_id = sel.split("—")[0].strip()
+            # Find the full order object
             previous_order = next((o for o in cust_orders if o["order_id"] == sel_id), None)
-            st.info(f"Loaded details from order **{sel_id}**.")
+            if previous_order:
+                 st.info(f"Loaded details from order **{sel_id}** for auto-filling Step 3.")
             
 st.markdown("---")
 
 # ---------------------------------------------------
-# 2️⃣ ORDER SPECIFICATION (No Form)
+# STEP 3 — ORDER SPECIFICATION (Main Form Logic)
 # ---------------------------------------------------
-st.header("2️⃣ Order Specification")
+
+def update_product_type():
+    st.session_state.current_product_type = st.session_state.product_type_select
+
+st.header("3️⃣ Order Specification")
 
 prev = previous_order or {}
 order_id = generate_order_id()
@@ -198,7 +271,9 @@ now_ist = datetime.now(IST).time()
 with colA:
     receive_date = st.date_input("📥 Received Date", value=date.today(), key="receive_date")
 with colB:
-    due_date = st.date_input("📤 Due Date", value=date.today(), key="due_date")
+    due_date = st.date_input("📤 Due Date", 
+                             value=datetime.strptime(prev.get("due", date.today().strftime("%Y-%m-%d %H:%M:%S IST")).split(' ')[0], '%Y-%m-%d').date() if 'due' in prev else date.today(), 
+                             key="due_date")
     
 receive_dt = datetime.combine(receive_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
 due_dt = datetime.combine(due_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
@@ -226,13 +301,8 @@ st.divider()
 st.subheader("Product & Quantity")
 col5, col6, col7 = st.columns(3)
 
-# Function to handle selectbox change and update session state
-def update_product_type():
-    st.session_state.current_product_type = st.session_state.product_type_select
-
 product_type_options = [PLACEHOLDER] + sorted(list(categories.keys()))
 
-# Use previous type if available, otherwise use the PLACEHOLDER
 initial_pt = prev.get("product_type", st.session_state.current_product_type or PLACEHOLDER)
 pt_index = product_type_options.index(initial_pt) if initial_pt in product_type_options else 0
 
@@ -242,12 +312,12 @@ with col5:
         product_type_options,
         index=pt_index,
         key="product_type_select", 
-        on_change=update_product_type # 👈 Crucial: Update session state immediately
+        on_change=update_product_type 
     )
 
 # --- CATEGORY LOGIC ---
 category = None 
-current_type = st.session_state.current_product_type # Use the session state value
+current_type = st.session_state.current_product_type 
 is_product_type_selected = current_type and current_type != PLACEHOLDER
 
 with col6:
@@ -255,8 +325,6 @@ with col6:
         category_list = categories.get(current_type, [])
         
         if category_list:
-            
-            # Use previous category from autofill or the first in the list
             default_cat = prev.get("category", category_list[0])
             
             try:
@@ -264,7 +332,6 @@ with col6:
             except ValueError:
                 cat_index = 0
             
-            # Use the current_type for the dynamic key
             category = st.selectbox(
                 "Product Category",
                 category_list,
@@ -347,31 +414,34 @@ st.markdown("---")
 # The submission button now triggers the final processing logic
 submitted = st.button("🚀 Create and Finalize Order", use_container_width=True, key="submit_button")
 
+
+# ---------------------------------------------------
+# SUBMISSION LOGIC (Handle PDF Creation and Cleanup)
+# ---------------------------------------------------
 if submitted:
     # --- Validation ---
-    if not customer_input:
-        st.error("Customer Name required")
+    if not final_customer_input:
+        st.error("Customer Name required (Step 1)")
         st.stop()
-    if not customer_phone_input:
-        st.error("Phone required")
+    if not final_phone_input:
+        st.error("Phone required (Step 1)")
         st.stop()
-    if not is_product_type_selected: # Checks the session state value
-        st.error("Please select a Product Type.")
+    if not is_product_type_selected: 
+        st.error("Please select a Product Type (Step 3).")
         st.stop()
-    # Check the category value retrieved from the selectbox
     if not category: 
-        st.error("Product Category required")
+        st.error("Product Category required (Step 3).")
         st.stop()
 
-    # --- Data Generation ---
+    # --- Data Preparation ---
     qr_b64 = generate_qr_base64(order_id)
 
     data = {
         "order_id": order_id,
-        "customer": customer_input,
-        "customer_phone": customer_phone_input,
-        "customer_email": customer_email_input,
-        "product_type": current_type, # Use the confirmed session state value
+        "customer": final_customer_input,
+        "customer_phone": final_phone_input,
+        "customer_email": final_email_input,
+        "product_type": current_type, 
         "category": category,
         "priority": priority,
         "qty": qty,
@@ -391,23 +461,29 @@ if submitted:
 
     push("orders", data)
 
+    # --- PDF Generation and Fix ---
     pdf_path = generate_order_pdf(data, qr_b64)
     
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
-        st.session_state["last_order_pdf"] = pdf_bytes
-
-    if os.path.exists(pdf_path):
+    try:
+        # 1. Read the PDF content into memory (bytes)
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+            st.session_state["last_order_pdf"] = pdf_bytes
+            
+        # 2. THEN, delete the temporary file
         os.unlink(pdf_path)
+    except Exception as e:
+        st.error(f"Error handling PDF file during download preparation: {e}")
+        st.stop()
 
 
     # --- Session State Update for Success ---
     st.session_state["last_order_id"] = order_id
     st.session_state["last_qr"] = qr_b64
-    st.session_state["last_whatsapp"] = get_whatsapp_link(customer_phone_input, order_id, customer_input)
+    st.session_state["last_whatsapp"] = get_whatsapp_link(final_phone_input, order_id, final_customer_input)
     st.session_state["last_tracking"] = f"https://srppackaging.com/tracking.html?id={order_id}"
     st.session_state["order_created_flag"] = True
-    st.session_state["current_product_type"] = None # Reset session state for a new order
+    st.session_state["current_product_type"] = None 
 
     st.rerun()
 
