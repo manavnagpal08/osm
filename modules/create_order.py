@@ -1,8 +1,7 @@
 import streamlit as st
 # Assuming these are custom modules; ensure they are accessible
-from firebase import read, push, update 
-from utils import generate_order_id
-from datetime import date, datetime, timezone, timedelta
+# from firebase import read, push, update 
+# from utils import generate_order_id
 import qrcode
 import base64
 import io
@@ -13,7 +12,43 @@ import urllib.parse
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 import tempfile
-import os # Import os for clean up
+from datetime import date, datetime, timezone, timedelta
+import os 
+import time # For the mock functions
+
+# ---------------------------------------------------
+# MOCK IMPORTS (Replace with your actual firebase/utils if testing locally)
+# ---------------------------------------------------
+
+# MOCK Firebase Functions
+def read(key):
+    """Mock read function. In a real app, this reads from Firebase."""
+    if key == "orders":
+        return {
+            "O1": {"order_id": "O1", "customer": "ABC Traders", "item": "Standard Folding Box", "product_type": "Box", "category": "Folding Box", "qty": 1000, "rate": 5.5, "board_thickness_id": "B-03", "paper_thickness_id": "P-10", "size_id": "S-101", "foil_id": "No", "spotuv_id": "Yes", "priority": "Medium", "advance": "Yes"},
+            "O2": {"order_id": "O2", "customer": "ABC Traders", "item": "Luxury Rigid Box", "product_type": "Box", "category": "Rigid Box", "qty": 500, "rate": 12.0, "board_thickness_id": "B-05", "paper_thickness_id": "P-12", "size_id": "S-205", "foil_id": "Yes", "spotuv_id": "No", "priority": "High", "advance": "Yes"},
+            "O3": {"order_id": "O3", "customer": "XYZ Bags", "item": "Plain Kraft Bag", "product_type": "Bag", "category": "Paper Bags", "qty": 2000, "rate": 3.0, "board_thickness_id": "", "paper_thickness_id": "P-08", "size_id": "S-301", "foil_id": "No", "spotuv_id": "No", "priority": "Low", "advance": "No"},
+        }
+    if key == "product_categories":
+        return {
+            "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
+            "Bag": ["Paper Bags", "SOS Envelopes"]
+        }
+    return {}
+
+def push(key, data):
+    """Mock push function."""
+    st.success(f"Mock Data Pushed to {key}: {data['order_id']}")
+    time.sleep(0.5)
+
+def update(key, data):
+    """Mock update function."""
+    st.success(f"Mock Data Updated for {key}.")
+    time.sleep(0.5)
+
+def generate_order_id():
+    """Mock order ID generator."""
+    return f"SRP-{int(time.time())}"
 
 
 # ---------------------------------------------------
@@ -23,7 +58,7 @@ st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_
 
 # WARNING: Replace with your actual credentials!
 GMAIL_USER = "yourgmail@gmail.com" 
-GMAIL_PASS = "your_app_password" # Use App Password, not main password
+GMAIL_PASS = "your_app_password" 
 
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
@@ -54,7 +89,6 @@ def generate_qr_base64(order_id: str):
 # ---------------------------------------------------
 def get_whatsapp_link(phone, order_id, customer):
     clean_phone = "".join(filter(str.isdigit, phone))
-    # Prepend 91 if it's missing (assuming Indian numbers)
     if not clean_phone.startswith("91"):
         clean_phone = "91" + clean_phone
 
@@ -79,7 +113,6 @@ def send_gmail(to, subject, html):
     msg.attach(MIMEText(html, "html"))
 
     try:
-        # Note: Corrected typo 'smtpltp' to 'smtplib'
         server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, to, msg.as_string())
@@ -94,7 +127,7 @@ def send_gmail(to, subject, html):
 # PDF GENERATOR
 # ---------------------------------------------------
 def generate_order_pdf(data, qr_b64):
-    logo_path = "srplogo.png" # Make sure this file exists in the directory!
+    logo_path = "srplogo.png" 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     qr_temp = None
 
@@ -113,7 +146,7 @@ def generate_order_pdf(data, qr_b64):
             c.drawImage(logo_path, x_margin, height - HEADER_HEIGHT + 30, width=130,
                         preserveAspectRatio=True, mask="auto")
         except:
-            pass # Ignore if logo file is missing
+            pass 
 
         separator_x = x_margin + 160
         c.setStrokeColorRGB(1, 1, 1)
@@ -149,7 +182,6 @@ def generate_order_pdf(data, qr_b64):
         c.drawString(x_margin, y, "Customer Details")
         y -= 35
 
-        # Format total value
         total_value = data["qty"] * data["rate"]
 
         customer_details = [
@@ -261,12 +293,13 @@ with st.sidebar.expander("Add/View Categories"):
 
     if st.button("Add Category", key="admin_add_btn"):
         if new_cat.strip():
-            if new_cat not in categories.get(type_choice_admin, []):
+            new_cat_clean = new_cat.strip()
+            if new_cat_clean not in categories.get(type_choice_admin, []):
                 if type_choice_admin not in categories:
                     categories[type_choice_admin] = []
-                categories[type_choice_admin].append(new_cat.strip())
+                categories[type_choice_admin].append(new_cat_clean)
                 update("product_categories", categories)
-                st.success(f"Category '{new_cat.strip()}' added to {type_choice_admin}!")
+                st.success(f"Category '{new_cat_clean}' added to {type_choice_admin}!")
                 st.rerun()
             else:
                 st.warning("Category already exists.")
@@ -332,7 +365,6 @@ with st.form("order_form"):
     st.subheader("Core Details")
     colA, colB, colC, colD = st.columns(4)
 
-    # Calculate current time in IST
     now_ist = datetime.now(IST).time() 
 
     with colA:
@@ -344,15 +376,19 @@ with st.form("order_form"):
     due_dt = datetime.combine(due_date, now_ist).strftime("%Y-%m-%d %H:%M:%S IST")
 
     with colC:
-        # Use select_slider for a cleaner look
         priority = st.select_slider(
             "Priority", 
             options=["Low", "Medium", "High"],
             value=prev.get("priority", "Medium")
         )
     with colD:
-        advance_value = prev.get("advance", "No") if previous_order else "No"
-        advance = st.radio("Advance Received?", ["Yes", "No"], horizontal=True, index=["Yes", "No"].index(advance_value))
+        advance_value = prev.get("advance", "No")
+        advance = st.radio(
+            "Advance Received?", 
+            ["Yes", "No"], 
+            horizontal=True, 
+            index=["Yes", "No"].index(advance_value) if advance_value in ["Yes", "No"] else 1
+        )
 
 
     # Product Type, Category, Quantity
@@ -361,29 +397,40 @@ with st.form("order_form"):
     col5, col6, col7 = st.columns(3)
     
     with col5:
-        # Default index handling for product_type
         default_pt = prev.get("product_type", "Box")
-        pt_index = ["Bag", "Box"].index(default_pt) if default_pt in ["Bag", "Box"] else 1
+        pt_options = ["Bag", "Box"]
+        pt_index = pt_options.index(default_pt) if default_pt in pt_options else 1
 
         product_type = st.selectbox(
             "Product Type",
-            ["Bag", "Box"],
-            index=pt_index
+            pt_options,
+            index=pt_index,
+            key="product_type_select" # Added key for better stability
         )
 
-    # Product Category — show only AFTER selecting product type
+    # FIX FOR CATEGORY NOT UPDATING: Use a dynamic key and proper index calculation
     category = ""
     category_list = categories.get(product_type, [])
 
     with col6:
         if category_list:
+            
+            # Determine the default category from the previous order (prev)
             default_cat = prev.get("category", category_list[0])
-            cat_index = category_list.index(default_cat) if default_cat in category_list else 0
+            
+            # Check if the default category is actually in the NEW category_list.
+            try:
+                cat_index = category_list.index(default_cat)
+            except ValueError:
+                # If the old category is not found (Product Type changed), default to 0.
+                cat_index = 0
             
             category = st.selectbox(
                 "Product Category",
                 category_list,
-                index=cat_index
+                index=cat_index,
+                # Dynamic key forces reset when product_type changes!
+                key=f"category_select_{product_type}" 
             )
         else:
             st.warning(f"No categories found for {product_type}. Add categories in sidebar.")
@@ -413,12 +460,21 @@ with st.form("order_form"):
 
         col_finish_1, col_finish_2 = st.columns(2)
         with col_finish_1:
-            # Foil / Spot UV YES/NO
-            foil_value = prev.get("foil_id", "No") if previous_order else "No"
-            foil = st.radio("Foil Required?", ["No", "Yes"], horizontal=True, index=["No", "Yes"].index(foil_value))
+            foil_value = prev.get("foil_id", "No")
+            foil = st.radio(
+                "Foil Required?", 
+                ["No", "Yes"], 
+                horizontal=True, 
+                index=["No", "Yes"].index(foil_value) if foil_value in ["No", "Yes"] else 0
+            )
         with col_finish_2:
-            spotuv_value = prev.get("spotuv_id", "No") if previous_order else "No"
-            spotuv = st.radio("Spot UV Required?", ["No", "Yes"], horizontal=True, index=["No", "Yes"].index(spotuv_value))
+            spotuv_value = prev.get("spotuv_id", "No")
+            spotuv = st.radio(
+                "Spot UV Required?", 
+                ["No", "Yes"], 
+                horizontal=True, 
+                index=["No", "Yes"].index(spotuv_value) if spotuv_value in ["No", "Yes"] else 0
+            )
 
 
     # Pricing & Submit
@@ -478,7 +534,7 @@ with st.form("order_form"):
             "foil_id": foil,
             "spotuv_id": spotuv,
             "rate": rate,
-            "stage": "Design", # Initial stage
+            "stage": "Design", 
             "order_qr": qr_b64,
         }
 
@@ -491,7 +547,6 @@ with st.form("order_form"):
             pdf_bytes = f.read()
             st.session_state["last_order_pdf"] = pdf_bytes
 
-        # Clean up the temporary PDF file immediately
         if os.path.exists(pdf_path):
             os.unlink(pdf_path)
 
@@ -507,7 +562,7 @@ with st.form("order_form"):
 
 
 # ---------------------------------------------------
-# SUCCESS BLOCK (Action-Oriented)
+# SUCCESS BLOCK
 # ---------------------------------------------------
 if st.session_state.get("order_created_flag"):
     st.balloons()
@@ -526,7 +581,6 @@ if st.session_state.get("order_created_flag"):
         )
         
     with col_wa:
-        # Custom HTML button for better WhatsApp link styling
         st.markdown(
             f"""
             <a href="{st.session_state['last_whatsapp']}" target="_blank">
@@ -542,7 +596,6 @@ if st.session_state.get("order_created_flag"):
 
     col_qr, col_track = st.columns([1, 2])
     with col_qr:
-        # Display the QR code
         st.image(
             base64.b64decode(st.session_state["last_qr"]), 
             caption=f"QR for Order {st.session_state['last_order_id']}", 
