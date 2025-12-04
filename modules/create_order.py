@@ -1,7 +1,6 @@
 import streamlit as st
-# 👇 PRODUCTION IMPORTS: Uncomment these when running in your environment
-# from firebase import read, push, update 
-# from utils import generate_order_id
+# 👇 PRODUCTION IMPORTS: NOW UNCOMMENTED AND ACTIVE
+from firebase import read, push, update 
 from datetime import date, datetime 
 import qrcode
 import base64
@@ -17,82 +16,12 @@ import os
 import time 
 
 # ===================================================
-# FIREBASE/UTILITY FUNCTIONS (CLEAN PLACEHOLDERS)
+# UTILITY FUNCTIONS (Non-Firebase)
 # ===================================================
-# NOTE: Replace these placeholder functions with your actual implementation.
-# They are empty/simple placeholders to allow the Streamlit UI to initialize.
-
-def read(key):
-    """Placeholder for reading data from your database (e.g., Firebase)."""
-    # Uncomment the code below once your real 'read' function is imported and available.
-    # return YOUR_REAL_READ_FUNCTION(key)
-    # Mock data structure to simulate an existing database with orders
-    if key == "orders":
-        return {
-            "ORD1678888800": {
-                "customer": "Rudra Enterprises",
-                "customer_phone": "919876543210",
-                "customer_email": "rudra@example.com",
-                "received": "2025-11-01",
-                "item": "Premium White Rigid Box",
-                "product_type": "Box",
-                "category": "Rigid Box",
-                "priority": "High",
-                "qty": 500,
-                "due": "2025-11-15",
-                "advance": "Yes",
-                "rate": 15.50
-            },
-            "ORD1678888801": {
-                "customer": "Tech Solutions Inc",
-                "customer_phone": "919998887776",
-                "customer_email": "tech@solutions.com",
-                "received": "2025-10-25",
-                "item": "Custom Branded Paper Bag - Large",
-                "product_type": "Bag",
-                "category": "Paper Bags",
-                "priority": "Medium",
-                "qty": 2000,
-                "due": "2025-11-10",
-                "advance": "No",
-                "rate": 2.25
-            },
-            "ORD1678888802": {
-                "customer": "Rudra Enterprises",
-                "customer_phone": "919876543210", # Consistent phone for Rudra
-                "customer_email": "rudra@example.com",
-                "received": "2025-12-01", # Latest order for Rudra
-                "item": "Small Mono Carton for Batteries",
-                "product_type": "Box",
-                "category": "Mono Cartons",
-                "priority": "Medium",
-                "qty": 10000,
-                "due": "2025-12-20",
-                "advance": "Yes",
-                "rate": 0.85
-            }
-        }
-    if key == "product_categories":
-        return {
-            "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
-            "Bag": ["Paper Bags", "SOS Envelopes"]
-        }
-    return {}
-
-def push(key, data):
-    """Placeholder for pushing new data to your database."""
-    # In a real app, this would save `data` to the Firebase path `key`.
-    print(f"--- PUSHING DATA TO: {key} ---")
-    # print(data)
-    pass 
-
-def update(key, data):
-    """Placeholder for updating existing data in your database."""
-    # In a real app, this would update data at the Firebase path `key`.
-    pass 
+# NOTE: The read/push/update functions are now imported from firebase.py
 
 def generate_order_id():
-    """Placeholder for generating a unique order ID."""
+    """Generates a unique order ID based on the current timestamp."""
     return f"ORD{int(time.time())}"
 # ===================================================
 
@@ -102,6 +31,7 @@ def generate_order_id():
 # ---------------------------------------------------
 st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_icon="📦")
 
+# 🚨 Update these with your actual credentials if you implement email sending
 GMAIL_USER = "yourgmail@gmail.com" 
 GMAIL_PASS = "your_app_password" 
 
@@ -127,7 +57,7 @@ PLACEHOLDER = "--- Select Type ---"
 # HELPER FUNCTIONS 
 # ---------------------------------------------------
 def generate_qr_base64(order_id: str):
-    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
+    tracking_url = f"https://omss-2ccc6-default-rtdb.firebaseio.com/orders/{order_id}"
     qr = qrcode.QRCode(box_size=10, border=3)
     qr.add_data(tracking_url)
     qr.make(fit=True)
@@ -138,9 +68,13 @@ def generate_qr_base64(order_id: str):
 
 def get_whatsapp_link(phone, order_id, customer):
     clean_phone = "".join(filter(str.isdigit, phone))
+    # Assuming phone numbers stored in Firebase are local or international without leading +
+    # Adding 91 if it's missing (common for Indian numbers in this context)
     if not clean_phone.startswith("91"):
-        clean_phone = "91" + clean_phone
-    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}"
+        clean_phone = "91" + clean_phone 
+        
+    # NOTE: Update the tracking link below to your customer-facing tracking page URL
+    tracking_url = f"https://srppackaging.com/tracking.html?id={order_id}" 
     message = (
         f"Hello {customer}, your order {order_id} has been created successfully!\n"
         f"Track your order:\n{tracking_url}\n\n"
@@ -150,9 +84,6 @@ def get_whatsapp_link(phone, order_id, customer):
     return f"https://wa.me/{clean_phone}?text={encoded}"
 
 def generate_order_pdf(data, qr_b64):
-    # NOTE: The PDF generation relies on reportlab and temporary files. 
-    # It also relies on a non-existent file 'srplogo.png'. 
-    # For execution, you may need to comment out the logo line or provide the file.
     logo_path = "srplogo.png" 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     qr_temp = None
@@ -228,13 +159,15 @@ def generate_order_pdf(data, qr_b64):
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
 
-all_orders = read("orders") or {}
+# 🚨 This now attempts to read live data from your Firebase path 'orders'
+all_orders = read("orders") or {} 
 customer_list = sorted(list(set(
     o.get("customer", "").strip() for o in all_orders.values() if isinstance(o, dict)
 )))
 
-categories = read("product_categories") or {}
-# Fallback structure for categories if database is empty
+# 🚨 This now attempts to read live data from your Firebase path 'product_categories'
+categories = read("product_categories") or {} 
+# Fallback structure for categories if database returns None or empty
 default_categories = {
     "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
     "Bag": ["Paper Bags", "SOS Envelopes"]
@@ -256,7 +189,7 @@ def reset_all_session_vars():
 
 
 # ---------------------------------------------------
-# 1️⃣ CUSTOMER BLOCK (FIXED, SIMPLE, RELIABLE)
+# 1️⃣ CUSTOMER BLOCK 
 # ---------------------------------------------------
 box = st.container(border=True)
 with box:
@@ -274,14 +207,13 @@ with box:
         )
 
     with col2:
-        pass  # spacing only
+        pass
 
 
     # ---------------------------
     # NEW ORDER
     # ---------------------------
     if order_type == "New Order 🆕":
-        # Ensure we read/write to the main session state variables
         st.session_state.customer_name_final = st.text_input(
             "Customer Name (Required)",
             value=st.session_state.get("customer_name_final", "")
@@ -317,7 +249,6 @@ with box:
         if selected_customer != "Select Customer":
             st.session_state.customer_name_final = selected_customer
 
-            # Fetch all orders of this customer
             cust_orders = [
                 o for o in all_orders.values()
                 if o.get("customer") == selected_customer
@@ -346,7 +277,6 @@ with box:
             st.text_input("Email", value=email_val, disabled=True)
 
         else:
-            # If "Select Customer" is chosen, clear state and display disabled fields
             st.session_state.customer_name_final = ""
             st.session_state.customer_phone_final = ""
             st.session_state.customer_email_final = ""
@@ -357,8 +287,6 @@ with box:
 # ---------------------------
 # FINAL CUSTOMER VARIABLES
 # ---------------------------
-# The submission logic relies on these variables, which now reliably read 
-# the customer selection/input from the session state.
 final_customer_input = st.session_state.get("customer_name_final", "")
 final_phone_input = st.session_state.get("customer_phone_final", "")
 final_email_input = st.session_state.get("customer_email_final", "")
@@ -388,8 +316,15 @@ if order_type_simple == "Repeat" and final_customer_input:
 
         if sel != "--- Select for Auto-fill ---":
             sel_id = sel.split("—")[0].strip()
-            previous_order = next((o for o in cust_orders if o["order_id"] == sel_id), None)
-            if previous_order:
+            # The structure of all_orders is {unique_firebase_key: {order_data}}
+            # We need to find the specific order data corresponding to the selected order_id
+            previous_order_entry = next((
+                o for o in all_orders.values() 
+                if isinstance(o, dict) and o.get("order_id") == sel_id
+            ), None)
+            
+            if previous_order_entry:
+                previous_order = previous_order_entry
                 st.info(f"Loaded details from order **{sel_id}** for auto-filling Step 3.")
             
 st.markdown("---")
@@ -573,9 +508,15 @@ if submitted:
         "rate": rate,
         "stage": "Design", 
         "order_qr": qr_b64,
+        # Firebase push will automatically add a unique key for the new order
     }
 
-    push("orders", data) 
+    # 🚨 PUSH DATA TO FIREBASE
+    try:
+        push_result = push("orders", data)
+    except Exception as e:
+        st.error(f"Failed to save order to Firebase: {e}")
+        st.stop()
 
     # --- PDF Generation and Fix ---
     pdf_path = generate_order_pdf(data, qr_b64)
