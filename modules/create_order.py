@@ -142,7 +142,8 @@ with st.form("order_form"):
     order_id = generate_order_id()
     st.text_input("Order ID", order_id, disabled=True)
 
-    now = datetime.now(timezone(timedelta(hours=5, 30))).time()
+    now = datetime.now(timezone(timedelta(hours=5, minutes=30))).time()
+
     recv_date = st.date_input("Received Date", date.today())
     due_date = st.date_input("Due Date", date.today())
 
