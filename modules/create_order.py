@@ -17,16 +17,24 @@ import os
 import time 
 
 # ===================================================
-# FIREBASE/UTILITY FUNCTIONS (Uncomment your implementation)
+# FIREBASE/UTILITY FUNCTIONS (MOCK PLACEHOLDERS)
 # ===================================================
-# NOTE: The implementation of read, push, update, and generate_order_id 
-# must be available for this code to run successfully in production.
-# The mock implementations are removed below.
+# NOTE: Replace these placeholder functions with your actual implementation.
 
-# Example placeholder structure for your real functions:
 def read(key):
-    # return YOUR_FIREBASE_READ_LOGIC(key)
-    return {} # TEMP placeholder until real function is provided
+    # Mock data structure for testing the Repeat Order flow
+    if key == "orders":
+        return {
+            "ORD001": {"customer": "ABC Traders", "customer_phone": "9312215239", "customer_email": "abc@trade.com", "product_type": "Box", "category": "Rigid Box", "item": "Luxury Gift Box", "received": "2023-10-01", "due": "2023-11-01", "priority": "High", "qty": 1000, "rate": 50.0, "advance": "Yes", "board_thickness_id": "1.5mm", "paper_thickness_id": "120gsm", "size_id": "A4", "foil_id": "Yes", "spotuv_id": "No"},
+            "ORD002": {"customer": "XYZ Corp", "customer_phone": "9876543210", "customer_email": "xyz@corp.in", "product_type": "Bag", "category": "Paper Bags", "item": "Shopping Bags", "received": "2023-11-15", "due": "2023-12-15", "priority": "Medium", "qty": 5000, "rate": 5.0, "advance": "No", "board_thickness_id": "N/A", "paper_thickness_id": "180gsm", "size_id": "L", "foil_id": "No", "spotuv_id": "No"},
+            "ORD003": {"customer": "ABC Traders", "customer_phone": "9312215239", "customer_email": "abc@trade.com", "product_type": "Box", "category": "Folding Box", "item": "Pizza Box", "received": "2024-01-20", "due": "2024-02-20", "priority": "Medium", "qty": 2000, "rate": 15.0, "advance": "Yes", "board_thickness_id": "3-ply", "paper_thickness_id": "N/A", "size_id": "12in", "foil_id": "No", "spotuv_id": "No"},
+        }
+    elif key == "product_categories":
+        return {
+            "Box": ["Rigid Box", "Folding Box", "Mono Cartons"],
+            "Bag": ["Paper Bags", "SOS Envelopes"]
+        }
+    return {}
 
 def push(key, data):
     # YOUR_FIREBASE_PUSH_LOGIC(key, data)
@@ -38,7 +46,7 @@ def update(key, data):
 
 def generate_order_id():
     # return YOUR_ID_GENERATION_LOGIC()
-    return f"ORD{int(time.time())}" # Simple production fallback/example
+    return f"ORD{int(time.time())}"
 # ===================================================
 
 
@@ -50,7 +58,7 @@ st.set_page_config(layout="wide", page_title="Create Manufacturing Order", page_
 GMAIL_USER = "yourgmail@gmail.com" 
 GMAIL_PASS = "your_app_password" 
 
-# Session State Initialization
+# Session State Initialization for flow control
 if "order_created_flag" not in st.session_state:
     st.session_state["order_created_flag"] = False
 if "last_order_pdf" not in st.session_state:
@@ -60,7 +68,8 @@ if "current_product_type" not in st.session_state:
 if "order_type" not in st.session_state:
     st.session_state["order_type"] = "New Order 🆕"
 
-for key in ["customer_input", "customer_phone_input", "customer_email_input"]:
+# Session State Initialization for customer input values (used across New/Repeat)
+for key in ["customer_name_final", "customer_phone_final", "customer_email_final"]:
     if key not in st.session_state:
         st.session_state[key] = ""
 
@@ -165,7 +174,7 @@ def generate_order_pdf(data, qr_b64):
 
 
 # ---------------------------------------------------
-# LOAD DATA & INITIAL SETUP
+# LOAD DATA & HELPER FUNCTIONS
 # ---------------------------------------------------
 st.title("📦 Create New Manufacturing Order")
 
@@ -185,9 +194,10 @@ for t in default_categories:
 
 def reset_customer_inputs():
     if st.session_state.order_type == "Repeat Order 🔄":
-        st.session_state["customer_input"] = ""
-        st.session_state["customer_phone_input"] = ""
-        st.session_state["customer_email_input"] = ""
+        # Reset name, phone, email, and product state when switching to repeat
+        st.session_state["customer_name_final"] = ""
+        st.session_state["customer_phone_final"] = ""
+        st.session_state["customer_email_final"] = ""
         st.session_state["current_product_type"] = PLACEHOLDER 
 
 def update_product_type():
@@ -196,13 +206,13 @@ def update_product_type():
 def reset_all_session_vars():
     st.session_state["order_created_flag"] = False
     st.session_state["current_product_type"] = None 
-    st.session_state["customer_input"] = ""
-    st.session_state["customer_phone_input"] = ""
-    st.session_state["customer_email_input"] = ""
+    st.session_state["customer_name_final"] = ""
+    st.session_state["customer_phone_final"] = ""
+    st.session_state["customer_email_final"] = ""
 
 
 # ---------------------------------------------------
-# 1️⃣ CUSTOMER BLOCK
+# 1️⃣ CUSTOMER BLOCK (FIXED CUSTOMER LOADING LOGIC)
 # ---------------------------------------------------
 box = st.container(border=True)
 with box:
@@ -223,11 +233,24 @@ with box:
 
     with col2:
         if order_type_simple == "New":
-            st.session_state.customer_input = st.text_input("Customer Name (Required)", key="customer_input_new")
-            st.session_state.customer_phone_input = st.text_input("Customer Phone (Required)", key="customer_phone_input_new")
-            st.session_state.customer_email_input = st.text_input("Customer Email", key="customer_email_input_new")
+            # New Order: Inputs read/write to the final session state variables
+            st.session_state.customer_name_final = st.text_input(
+                "Customer Name (Required)", 
+                value=st.session_state.customer_name_final,
+                key="customer_input_new"
+            )
+            st.session_state.customer_phone_final = st.text_input(
+                "Customer Phone (Required)", 
+                value=st.session_state.customer_phone_final,
+                key="customer_phone_input_new"
+            )
+            st.session_state.customer_email_final = st.text_input(
+                "Customer Email", 
+                value=st.session_state.customer_email_final,
+                key="customer_email_input_new"
+            )
             
-        else: # Repeat
+        else: # Repeat Order 🔄
             selected = st.selectbox(
                 "Select Existing Customer", 
                 ["Select"] + customer_list, 
@@ -235,30 +258,56 @@ with box:
             )
             
             if selected != "Select":
-                final_customer_name = selected.strip()
-                st.session_state.customer_input = final_customer_name
+                customer_name = selected.strip()
                 
-                cust_orders = [o for o in all_orders.values() if o.get("customer") == final_customer_name]
+                # Step 1: Immediately update the customer name in state
+                st.session_state.customer_name_final = customer_name
+                
+                cust_orders = [o for o in all_orders.values() if o.get("customer") == customer_name]
 
-                customer_phone_val = ""
-                customer_email_val = ""
+                phone_val = ""
+                email_val = ""
                 if cust_orders:
-                    latest = sorted(cust_orders, key=lambda x: x.get("received", "0000"), reverse=True)[0]
-                    customer_phone_val = latest.get("customer_phone", "")
-                    customer_email_val = latest.get("customer_email", "")
-                
-                st.session_state.customer_phone_input = st.text_input("Phone", customer_phone_val, key="customer_phone_input_repeat")
-                st.session_state.customer_email_input = st.text_input("Email", customer_email_val, key="customer_email_input_repeat")
+                    # Find the latest order for contact details
+                    latest = sorted(
+                        cust_orders, 
+                        key=lambda x: x.get("received", "0000"), 
+                        reverse=True
+                    )[0]
+                    
+                    # Step 2: Set phone/email values to be used as initial input values
+                    phone_val = latest.get("customer_phone", "")
+                    email_val = latest.get("customer_email", "")
+
+                # Step 3: Inputs read/write to the final session state variables, using fetched data as default/initial value
+                st.session_state.customer_phone_final = st.text_input(
+                    "Phone", 
+                    value=phone_val, 
+                    key="customer_phone_input_repeat"
+                )
+                st.session_state.customer_email_final = st.text_input(
+                    "Email", 
+                    value=email_val, 
+                    key="customer_email_input_repeat"
+                )
+
+                # IMPORTANT: If the user changes the text input, the 'st.text_input' update will automatically 
+                # overwrite st.session_state.customer_phone_final/customer_email_final on the next run.
             
             else:
-                st.session_state.customer_input = ""
-                st.session_state.customer_phone_input = st.text_input("Phone", "", key="customer_phone_input_repeat_empty", disabled=True)
-                st.session_state.customer_email_input = st.text_input("Email", "", key="customer_email_input_repeat_empty", disabled=True)
+                # If "Select" is chosen, clear inputs and display disabled fields
+                st.session_state.customer_name_final = ""
+                st.session_state.customer_phone_final = ""
+                st.session_state.customer_email_final = ""
+
+                st.text_input("Phone", "", key="customer_phone_input_repeat_empty", disabled=True)
+                st.text_input("Email", "", key="customer_email_input_repeat_empty", disabled=True)
 
 
-final_customer_input = st.session_state.customer_input
-final_phone_input = st.session_state.customer_phone_input
-final_email_input = st.session_state.customer_email_input
+# Set final variables for submission reference
+final_customer_input = st.session_state.customer_name_final
+final_phone_input = st.session_state.customer_phone_final
+final_email_input = st.session_state.customer_email_final
 
 
 # ---------------------------------------------------
@@ -291,7 +340,7 @@ if order_type_simple == "Repeat" and final_customer_input:
 st.markdown("---")
 
 # ---------------------------------------------------
-# 3️⃣ ORDER SPECIFICATION
+# 3️⃣ ORDER SPECIFICATION (FULL FORM)
 # ---------------------------------------------------
 st.header("3️⃣ Order Specification")
 
@@ -368,7 +417,7 @@ with col6:
                 key=f"category_select_{current_type}" 
             )
         else:
-            st.warning(f"No categories found for {current_type}. Add categories in sidebar.")
+            st.warning(f"No categories found for {current_type}. Add categories in database.")
     else:
         st.info("Select a Product Type first") 
 
@@ -378,7 +427,7 @@ with col7:
 item = st.text_area("Product Description (Detailed specifications, content, etc.)", value=prev.get("item", ""), height=100, key="item_description")
 
 
-## Manufacturing Specifications (RESTORED SECTION)
+## Manufacturing Specifications
 st.divider()
 st.subheader("Manufacturing Specifications")
 
@@ -470,7 +519,7 @@ if submitted:
         "order_qr": qr_b64,
     }
 
-    push("orders", data) # Real push function runs here
+    push("orders", data) 
 
     # --- PDF Generation and Fix ---
     pdf_path = generate_order_pdf(data, qr_b64)
@@ -482,7 +531,6 @@ if submitted:
             
         os.unlink(pdf_path)
     except Exception as e:
-        # In production, this error should be logged, but we show it to the user
         st.error(f"Error handling PDF file during download preparation: {e}")
         st.stop()
 
